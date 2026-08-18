@@ -1,0 +1,6 @@
+{
+  "name": "Pinkku Social Assistant",
+  "description": "AI business assistant for Myanmar small businesses connecting Facebook, Instagram, TikTok, Telegram, and Gmail into one central hub.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
