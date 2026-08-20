@@ -1,6 +1,0 @@
-import app from '../app.ts';
-
-// Vercel's catch-all filename routes every /api/* request to this one
-// function; Express's own routing inside `app` (app.get('/api/auth/login',
-// ...), etc.) handles the rest, same as it does under `npm start`.
-export default app;
