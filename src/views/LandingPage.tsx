@@ -33,10 +33,10 @@ const PLATFORMS = [
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin }) => {
   return (
-    <div className="min-h-screen bg-white text-slate-900">
+    <div className="min-h-screen bg-pink-50 text-slate-900">
 
       {/* ================= NAV ================= */}
-      <header className="sticky top-0 z-40 backdrop-blur-md bg-white/80 border-b border-pink-100">
+      <header className="sticky top-0 z-40 backdrop-blur-md bg-pink-50/80 border-b border-pink-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-14 h-14 rounded-2xl overflow-hidden shadow-lg shadow-pink-500/25 shrink-0">
@@ -201,7 +201,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
       </section>
 
       {/* ================= PRODUCT PREVIEW ================= */}
-      <section id="preview" className="bg-slate-50 py-20">
+      <section id="preview" className="bg-pink-50/70 py-20">
         <div className="max-w-5xl mx-auto px-4 sm:px-6">
           <div className="text-center max-w-xl mx-auto space-y-3 mb-12">
             <span className="text-[11px] font-black uppercase tracking-widest text-[#FF2D85]">Inside Pinkku</span>

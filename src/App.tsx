@@ -350,7 +350,7 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50/50 via-slate-50 to-rose-50/40 text-slate-900 flex flex-col">
+    <div className="min-h-screen bg-gradient-to-br from-pink-100 via-pink-50 to-rose-100 text-slate-900 flex flex-col">
       {/* Top Navbar */}
       <Navbar
         user={user}
