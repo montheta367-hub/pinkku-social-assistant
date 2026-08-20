@@ -1,0 +1,9 @@
+{
+  "buildCommand": "vite build",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/[...all].ts": {
+      "maxDuration": 30
+    }
+  }
+}

@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "tsc --noEmit",
     "preview": "vite preview",
-    "start": "node --env-file=.env server.ts"
+    "start": "node --env-file=.env server.ts",
+    "telegram:set-webhook": "node --env-file=.env scripts/set-telegram-webhook.ts"
   },
   "dependencies": {
     "@google/genai": "latest",
