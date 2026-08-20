@@ -1,4 +1,4 @@
-import app from '../app';
+import app from '../app.js';
 
 // vercel.json rewrites every /api/* request to this one function; Express's
 // own routing inside `app` (app.get('/api/auth/login', ...), etc.) handles
