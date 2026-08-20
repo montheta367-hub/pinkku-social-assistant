@@ -46,6 +46,21 @@ function getWeekStart(offset: number): Date {
   return monday;
 }
 
+// Converts a picked calendar date into the weekOffset (relative to this
+// week's Monday) whose 7-day range contains it, so the date picker can jump
+// straight to any week instead of only stepping one week at a time.
+function weekOffsetForDate(iso: string): number {
+  const [y, m, d] = iso.split('-').map(Number);
+  const target = new Date(y, m - 1, d);
+  const targetDay = target.getDay();
+  const targetMonday = new Date(target);
+  targetMonday.setDate(target.getDate() + (targetDay === 0 ? -6 : 1 - targetDay));
+
+  const thisMonday = getWeekStart(0);
+  const diffDays = Math.round((targetMonday.getTime() - thisMonday.getTime()) / (24 * 60 * 60 * 1000));
+  return Math.round(diffDays / 7);
+}
+
 export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
   posts, onCreatePost, onSubmitForReview, onApprovePost, onRequestChanges, onDeleteDraft
 }) => {
@@ -298,6 +313,13 @@ export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
               Today
             </button>
           )}
+          <input
+            type="date"
+            value={days[0].iso}
+            onChange={(e) => e.target.value && setWeekOffset(weekOffsetForDate(e.target.value))}
+            className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-[11px] font-bold text-slate-600"
+            title="Jump to date"
+          />
         </div>
 
         {/* Channel Filter Pills */}
