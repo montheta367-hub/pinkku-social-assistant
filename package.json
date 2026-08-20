@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "tsc --noEmit",
     "preview": "vite preview",
-    "start": "node --env-file=.env server.ts",
+    "start": "tsx --env-file=.env server.ts",
     "telegram:set-webhook": "node --env-file=.env scripts/set-telegram-webhook.ts"
   },
   "dependencies": {
@@ -33,6 +33,7 @@
     "autoprefixer": "^10.4.19",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.4",
+    "tsx": "^4.23.12",
     "typescript": "^5.4.5",
     "vite": "^5.2.13"
   }

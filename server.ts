@@ -1,4 +1,4 @@
-import app from './app.ts';
+import app from './app';
 
 // Local dev / `npm start` entry point — starts the persistent server.
 // On Vercel, api/[...all].ts imports the same `app` and exports it directly
