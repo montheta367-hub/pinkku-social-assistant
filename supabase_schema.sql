@@ -100,6 +100,9 @@ CREATE TABLE IF NOT EXISTS telegram_groups (
 -- AI-drafted reply sent automatically instead of waiting for manual review.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_auto_reply BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- Same idea, for incoming Facebook Messenger DMs to a connected Page.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS facebook_auto_reply BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- Social posts, including the solo-review workflow: draft -> pending_review ->
 -- scheduled -> published. platforms/tags are stored as JSON-encoded text
 -- arrays to match this codebase's existing simple-column style.

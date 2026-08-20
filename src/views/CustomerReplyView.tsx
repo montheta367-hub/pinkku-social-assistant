@@ -36,6 +36,8 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
   const [linkCopied, setLinkCopied] = useState(false);
   const [autoReply, setAutoReply] = useState(false);
   const [autoReplyLoading, setAutoReplyLoading] = useState(false);
+  const [facebookAutoReply, setFacebookAutoReply] = useState(false);
+  const [facebookAutoReplyLoading, setFacebookAutoReplyLoading] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem('pinkku_token');
@@ -47,6 +49,10 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
     fetch('/api/settings/telegram-auto-reply', { headers: { Authorization: `Bearer ${token}` } })
       .then(res => (res.ok ? res.json() : null))
       .then(data => { if (data) setAutoReply(!!data.enabled); })
+      .catch(() => {});
+    fetch('/api/settings/facebook-auto-reply', { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => { if (data) setFacebookAutoReply(!!data.enabled); })
       .catch(() => {});
   }, []);
 
@@ -71,6 +77,24 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
       setAutoReply(!next);
     } finally {
       setAutoReplyLoading(false);
+    }
+  };
+
+  const handleToggleFacebookAutoReply = async () => {
+    const next = !facebookAutoReply;
+    setFacebookAutoReply(next);
+    setFacebookAutoReplyLoading(true);
+    const token = localStorage.getItem('pinkku_token');
+    try {
+      await fetch('/api/settings/facebook-auto-reply', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ enabled: next }),
+      });
+    } catch {
+      setFacebookAutoReply(!next);
+    } finally {
+      setFacebookAutoReplyLoading(false);
     }
   };
 
@@ -177,6 +201,27 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
           </button>
         </div>
       )}
+
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-3.5 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className={`p-1.5 rounded-lg ${facebookAutoReply ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-400'}`}>
+            <Zap className="w-3.5 h-3.5" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-black text-slate-900">Auto Reply for Facebook</p>
+            <p className="text-[11px] text-slate-500 font-medium">
+              {facebookAutoReply ? 'AI replies to Messenger customers automatically, no review needed.' : 'AI drafts a reply — you review and send it manually.'}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={handleToggleFacebookAutoReply}
+          disabled={facebookAutoReplyLoading}
+          className={`relative shrink-0 w-11 h-6 rounded-full transition-colors disabled:opacity-50 ${facebookAutoReply ? 'bg-amber-500' : 'bg-slate-200'}`}
+        >
+          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${facebookAutoReply ? 'translate-x-5' : ''}`} />
+        </button>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 

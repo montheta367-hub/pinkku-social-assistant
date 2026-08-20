@@ -1023,6 +1023,20 @@ app.patch('/api/settings/telegram-auto-reply', requireAuth, async (req: AuthedRe
   return res.json({ success: true, enabled: !!enabled });
 });
 
+// Same idea, for incoming Facebook Messenger DMs to a connected Page.
+app.get('/api/settings/facebook-auto-reply', requireAuth, async (req: AuthedRequest, res) => {
+  const { data, error } = await db.from('users').select('facebook_auto_reply').eq('id', req.user!.id).maybeSingle();
+  if (error) return res.status(500).json({ error: 'Could not load this setting.' });
+  return res.json({ enabled: !!data?.facebook_auto_reply });
+});
+
+app.patch('/api/settings/facebook-auto-reply', requireAuth, async (req: AuthedRequest, res) => {
+  const { enabled } = req.body;
+  const { error } = await db.from('users').update({ facebook_auto_reply: !!enabled }).eq('id', req.user!.id);
+  if (error) return res.status(500).json({ error: 'Could not save this setting.' });
+  return res.json({ success: true, enabled: !!enabled });
+});
+
 function sendTelegramMessage(botToken: string, chatId: string | number, text: string) {
   return fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: 'POST',
@@ -1262,6 +1276,28 @@ async function handleFacebookEntry(entry: any): Promise<void> {
       // Profile lookup failed — the generic fallback name above is fine.
     }
 
+    const { data: owner } = await db.from('users').select('business_name, facebook_auto_reply').eq('id', account.user_id).maybeSingle();
+    let status = 'unread';
+    let replyText: string | null = null;
+
+    if (owner?.facebook_auto_reply) {
+      try {
+        const reply = await generateAIReply({
+          customerMessage: text,
+          customerName,
+          platform: 'facebook',
+          businessName: owner.business_name,
+        });
+        replyText = reply.suggestedReplyMyanmar || reply.suggestedReplyEnglish || null;
+        if (replyText) {
+          await sendFacebookMessage(account.access_token, senderId, replyText);
+          status = 'replied';
+        }
+      } catch (err) {
+        console.error('[facebook] auto-reply generation failed:', err);
+      }
+    }
+
     await db.from('customer_messages').insert({
       id: 'msg_' + randomUUID(),
       user_id: account.user_id,
@@ -1269,7 +1305,8 @@ async function handleFacebookEntry(entry: any): Promise<void> {
       external_chat_id: senderId,
       customer_name: customerName,
       message: text,
-      status: 'unread',
+      status,
+      reply_text: replyText,
       created_at: new Date().toISOString(),
     });
 
