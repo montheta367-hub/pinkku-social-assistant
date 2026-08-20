@@ -509,7 +509,12 @@ app.get('/api/oauth/google/callback', async (req, res) => {
 // ---------------------------------------------------------------------------
 const FACEBOOK_API_VERSION = 'v21.0';
 const FACEBOOK_REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI || `http://localhost:${PORT}/api/oauth/facebook/callback`;
-const FACEBOOK_SCOPES = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'pages_manage_metadata', 'instagram_basic', 'instagram_content_publish'].join(',');
+// Instagram scopes ('instagram_basic', 'instagram_content_publish') are
+// intentionally left out — Meta's app setup now routes Instagram through a
+// separate "Instagram API" product with different permission names
+// (instagram_business_basic, etc.), so the old Page-linked Instagram scopes
+// below are rejected as invalid until that's set up too.
+const FACEBOOK_SCOPES = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'pages_manage_metadata', 'pages_messaging'].join(',');
 
 app.post('/api/oauth/facebook/start', requireAuth, async (req: AuthedRequest, res) => {
   const appId = process.env.FACEBOOK_APP_ID;
@@ -596,6 +601,22 @@ app.get('/api/oauth/facebook/callback', async (req, res) => {
       access_token: page.access_token,
       connected_at: new Date().toISOString(),
     });
+
+    // Subscribe this Page to the app's webhook for the "messages" field, so
+    // incoming Messenger DMs start POSTing to /api/facebook/webhook below
+    // instead of just sitting unread in the Page's own inbox.
+    try {
+      const subRes = await fetch(
+        `https://graph.facebook.com/${FACEBOOK_API_VERSION}/${page.id}/subscribed_apps?subscribed_fields=messages&access_token=${encodeURIComponent(page.access_token)}`,
+        { method: 'POST' }
+      );
+      const subData: any = await subRes.json();
+      if (!subRes.ok || subData.error) {
+        console.error('[oauth] Facebook Page webhook subscription rejected (non-fatal):', subData);
+      }
+    } catch (subErr) {
+      console.error('[oauth] Facebook Page webhook subscription error (non-fatal):', subErr);
+    }
 
     // 4) Instagram Business accounts connect through the same Facebook Page —
     // check if this Page has one linked, and connect it too if so.
@@ -1194,6 +1215,110 @@ app.post('/api/telegram/webhook', async (req, res) => {
     await handleTelegramUpdate(req.body);
   } catch (err) {
     console.error('[telegram] webhook handling error:', err);
+  }
+  return res.status(200).end();
+});
+
+// ---------------------------------------------------------------------------
+// Facebook Messenger — incoming DMs to a connected Page, delivered via
+// webhook (subscribed right after the Page is connected, above). Unlike
+// Telegram's one-shared-bot setup, each business has its own Page, so the
+// Page ID in the webhook payload tells us directly which owner_user_id this
+// message belongs to — no separate "contacts" mapping table needed.
+// ---------------------------------------------------------------------------
+function sendFacebookMessage(pageAccessToken: string, recipientPsid: string, text: string) {
+  return fetch(`https://graph.facebook.com/${FACEBOOK_API_VERSION}/me/messages?access_token=${encodeURIComponent(pageAccessToken)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recipient: { id: recipientPsid }, message: { text } }),
+  }).catch(() => {});
+}
+
+async function handleFacebookEntry(entry: any): Promise<void> {
+  const pageId = entry.id;
+  const events = entry.messaging || [];
+
+  for (const event of events) {
+    const senderId: string | undefined = event.sender?.id;
+    const text: string | undefined = event.message?.text;
+    // Skip delivery/read receipts, postbacks, and echoes of the Page's own sent messages.
+    if (!senderId || !text || event.message?.is_echo) continue;
+
+    const { data: account } = await db.from('connected_accounts')
+      .select('user_id, access_token')
+      .eq('platform', 'facebook')
+      .eq('external_id', pageId)
+      .maybeSingle();
+    if (!account) continue;
+
+    let customerName = 'Facebook Customer';
+    try {
+      const profileRes = await fetch(
+        `https://graph.facebook.com/${FACEBOOK_API_VERSION}/${senderId}?fields=first_name,last_name&access_token=${encodeURIComponent(account.access_token)}`
+      );
+      const profile: any = await profileRes.json();
+      if (profile.first_name) customerName = [profile.first_name, profile.last_name].filter(Boolean).join(' ');
+    } catch {
+      // Profile lookup failed — the generic fallback name above is fine.
+    }
+
+    await db.from('customer_messages').insert({
+      id: 'msg_' + randomUUID(),
+      user_id: account.user_id,
+      platform: 'facebook',
+      external_chat_id: senderId,
+      customer_name: customerName,
+      message: text,
+      status: 'unread',
+      created_at: new Date().toISOString(),
+    });
+
+    const detected = await detectEventInMessage(text, customerName);
+    if (detected?.eventDetected && detected.eventDate) {
+      await db.from('schedule_events').insert({
+        id: 'fb_' + randomUUID(),
+        user_id: account.user_id,
+        title: detected.eventTitle || `Message from ${customerName}`,
+        date: detected.eventDate,
+        time: detected.eventTime || null,
+        importance: detected.importance || 'normal',
+        source_subject: `Facebook Messenger — ${customerName}: ${text.slice(0, 120)}`,
+        manual: false,
+        created_at: new Date().toISOString(),
+      });
+    }
+  }
+}
+
+// Meta's one-time handshake to verify you control this callback URL —
+// configured once in the app's Webhooks product settings (Callback URL +
+// Verify Token), same idea as Telegram's webhook secret above.
+app.get('/api/facebook/webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  const expectedToken = process.env.FACEBOOK_WEBHOOK_VERIFY_TOKEN;
+
+  if (mode === 'subscribe' && expectedToken && token === expectedToken) {
+    return res.status(200).send(String(challenge ?? ''));
+  }
+  return res.status(403).end();
+});
+
+// Meta POSTs every Page event here (message received, delivered, read,
+// etc.) once the Page is subscribed. Process fully before responding, same
+// reasoning as the Telegram webhook — serverless functions can freeze
+// immediately after the response is sent.
+app.post('/api/facebook/webhook', async (req, res) => {
+  try {
+    const body = req.body;
+    if (body?.object === 'page') {
+      for (const entry of body.entry || []) {
+        await handleFacebookEntry(entry);
+      }
+    }
+  } catch (err) {
+    console.error('[facebook] webhook handling error:', err);
   }
   return res.status(200).end();
 });
@@ -1818,8 +1943,9 @@ app.delete('/api/posts/:id', requireAuth, async (req: AuthedRequest, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Customer Messages — real inbound messages (currently Telegram, routed via
-// telegram_contacts above) shown in the Customer DMs inbox.
+// Customer Messages — real inbound messages (Telegram, routed via
+// telegram_contacts above; Facebook Messenger, routed via the connected
+// Page's external_id above) shown in the Customer DMs inbox.
 // ---------------------------------------------------------------------------
 app.get('/api/messages', requireAuth, async (req: AuthedRequest, res) => {
   try {
@@ -1854,6 +1980,11 @@ app.post('/api/messages/:id/reply', requireAuth, async (req: AuthedRequest, res)
     if (row.platform === 'telegram' && row.external_chat_id) {
       const botToken = process.env.TELEGRAM_BOT_TOKEN;
       if (botToken) await sendTelegramMessage(botToken, row.external_chat_id, replyText);
+    }
+
+    if (row.platform === 'facebook' && row.external_chat_id) {
+      const account = await getConnectedAccount(req.user!.id, 'facebook');
+      if (account?.access_token) await sendFacebookMessage(account.access_token, row.external_chat_id, replyText);
     }
 
     const { error: updateError } = await db.from('customer_messages').update({ status: 'replied' }).eq('user_id', req.user!.id).eq('id', req.params.id);
