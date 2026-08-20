@@ -27,6 +27,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="w-14 h-14 rounded-2xl overflow-hidden shadow-md shadow-pink-500/25 shrink-0">
             <img src={pinkkuIcon} alt="Pinkku" className="w-full h-full object-cover" />
           </div>
+          <span className="text-xl font-black text-slate-900 tracking-tight">Pinkku</span>
         </div>
 
         {/* Action Controls */}
