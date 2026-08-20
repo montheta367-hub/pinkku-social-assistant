@@ -42,6 +42,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
             <div className="w-14 h-14 rounded-2xl overflow-hidden shadow-lg shadow-pink-500/25 shrink-0">
               <img src={pinkkuIcon} alt="Pinkku" className="w-full h-full object-cover" />
             </div>
+            <span className="text-xl font-black text-slate-900 tracking-tight">Pinkku</span>
           </div>
 
           <nav className="hidden md:flex items-center gap-8 text-xs font-bold text-slate-600">
