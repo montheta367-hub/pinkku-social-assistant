@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { UserProfile, PlatformType, SocialPost } from '../types';
 import { PlatformLogo } from '../components/PlatformLogo';
-import { Sparkles, Send, Copy, Check, Calendar, RefreshCw, Wand2, Tag, Layers } from 'lucide-react';
+import { Sparkles, Send, Copy, Check, RefreshCw, Wand2, Tag, FileText, ClipboardCheck } from 'lucide-react';
 
 interface ContentCreatorViewProps {
   user: UserProfile;
-  onSavePost: (post: SocialPost) => void;
+  onSavePost: (post: Omit<SocialPost, 'id' | 'createdAt'>) => void;
 }
 
 export const ContentCreatorView: React.FC<ContentCreatorViewProps> = ({ user, onSavePost }) => {
@@ -19,10 +19,8 @@ export const ContentCreatorView: React.FC<ContentCreatorViewProps> = ({ user, on
   const [englishText, setEnglishText] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   
-  const [scheduledDate, setScheduledDate] = useState("2026-08-15");
-  const [scheduledTime, setScheduledTime] = useState("18:30");
   const [copied, setCopied] = useState(false);
-  const [postSaved, setPostSaved] = useState(false);
+  const [savedAs, setSavedAs] = useState<'draft' | 'pending_review' | null>(null);
 
   const togglePlatform = (p: PlatformType) => {
     if (selectedPlatforms.includes(p)) {
@@ -37,7 +35,7 @@ export const ContentCreatorView: React.FC<ContentCreatorViewProps> = ({ user, on
   const handleGenerate = async () => {
     if (!topic.trim()) return;
     setIsGenerating(true);
-    setPostSaved(false);
+    setSavedAs(null);
 
     try {
       const res = await fetch("/api/ai/generate-post", {
@@ -76,26 +74,20 @@ export const ContentCreatorView: React.FC<ContentCreatorViewProps> = ({ user, on
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleSchedulePost = () => {
+  const handleSave = (status: 'draft' | 'pending_review') => {
     if (!myanmarText && !englishText) return;
 
-    const newPost: SocialPost = {
-      id: 'post_' + Date.now(),
+    onSavePost({
       title: generatedTitle || topic || 'New Social Post',
       content: englishText,
       myanmarContent: myanmarText,
       platforms: selectedPlatforms,
-      scheduledDate,
-      scheduledTime,
-      status: 'scheduled',
+      status,
       tone,
       tags,
-      createdAt: new Date().toISOString().split('T')[0]
-    };
-
-    onSavePost(newPost);
-    setPostSaved(true);
-    setTimeout(() => setPostSaved(false), 3000);
+    });
+    setSavedAs(status);
+    setTimeout(() => setSavedAs(null), 3000);
   };
 
   return (
@@ -225,8 +217,8 @@ export const ContentCreatorView: React.FC<ContentCreatorViewProps> = ({ user, on
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-black text-slate-800">Generated Post Preview</span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                  Ready to Publish
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                  Needs Your Review
                 </span>
               </div>
 
@@ -294,45 +286,37 @@ export const ContentCreatorView: React.FC<ContentCreatorViewProps> = ({ user, on
             </div>
           </div>
 
-          {/* Scheduling & Publish Action */}
+          {/* Save Actions */}
           <div className="pt-4 border-t border-slate-100 space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 mb-1">Schedule Date</label>
-                <input
-                  type="date"
-                  value={scheduledDate}
-                  onChange={(e) => setScheduledDate(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-800"
-                />
-              </div>
+            <p className="text-[11px] text-slate-400 font-medium">
+              AI-generated content always needs a human check before it goes out — save as a draft to keep editing, or submit it for review to approve and schedule it.
+            </p>
 
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 mb-1">Publish Time (MMT)</label>
-                <input
-                  type="time"
-                  value={scheduledTime}
-                  onChange={(e) => setScheduledTime(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-800"
-                />
-              </div>
-            </div>
-
-            {postSaved && (
+            {savedAs && (
               <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-bold flex items-center gap-2">
                 <Check className="w-4 h-4 text-emerald-600" />
-                <span>✓ Post scheduled and synced to Cross-Platform Spider Hub!</span>
+                <span>{savedAs === 'draft' ? '✓ Saved as draft.' : '✓ Submitted for review — find it in the Social Calendar to approve & schedule.'}</span>
               </div>
             )}
 
-            <button
-              onClick={handleSchedulePost}
-              disabled={!myanmarText && !englishText}
-              className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs shadow-sm transition-all flex items-center justify-center gap-2 disabled:opacity-40"
-            >
-              <Calendar className="w-4 h-4" />
-              <span>Schedule Across All Selected Channels</span>
-            </button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                onClick={() => handleSave('draft')}
+                disabled={!myanmarText && !englishText}
+                className="w-full py-3 px-4 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-extrabold text-xs shadow-sm transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+              >
+                <FileText className="w-4 h-4" />
+                <span>Save as Draft</span>
+              </button>
+              <button
+                onClick={() => handleSave('pending_review')}
+                disabled={!myanmarText && !englishText}
+                className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs shadow-sm transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+              >
+                <ClipboardCheck className="w-4 h-4" />
+                <span>Submit for Review</span>
+              </button>
+            </div>
           </div>
 
         </div>

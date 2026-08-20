@@ -95,19 +95,28 @@ export const ChannelAudienceDonut: React.FC<ChannelAudienceDonutProps> = ({ conn
   const data = connections.filter(c => (c.followerCount || 0) > 0);
   const total = data.reduce((acc, c) => acc + (c.followerCount || 0), 0);
 
-  if (total === 0) {
-    return (
-      <div className="h-[168px] flex items-center justify-center text-center px-4">
-        <p className="text-xs text-slate-400 font-medium">Connect a channel to see your audience breakdown here.</p>
-      </div>
-    );
-  }
-
   const size = 128;
   const strokeW = 20;
   const r = (size - strokeW) / 2;
   const circumference = 2 * Math.PI * r;
   const gapPx = 3;
+
+  if (total === 0) {
+    return (
+      <div className="flex items-center gap-5">
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Audience by channel — no data yet">
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#f1f5f9" strokeWidth={strokeW} />
+          <text x={size / 2} y={size / 2 - 3} textAnchor="middle" fontSize="15" fontWeight={800} fill="#cbd5e1">
+            0
+          </text>
+          <text x={size / 2} y={size / 2 + 13} textAnchor="middle" fontSize="9" fontWeight={700} fill="#cbd5e1">
+            FOLLOWERS
+          </text>
+        </svg>
+        <p className="text-xs text-slate-400 font-medium flex-1">Connect a channel to see your audience breakdown here.</p>
+      </div>
+    );
+  }
 
   let cumulative = 0;
   const segments = data.map((c) => {

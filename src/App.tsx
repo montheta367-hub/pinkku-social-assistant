@@ -14,6 +14,7 @@ import { ContentCalendarView } from './views/ContentCalendarView';
 import { CustomerReplyView } from './views/CustomerReplyView';
 import { ConnectionsView } from './views/ConnectionsView';
 import { GmailAIView } from './views/GmailAIView';
+import { AISmartScheduleView } from './views/AISmartScheduleView';
 import { TikTokManagementView } from './views/TikTokManagementView';
 import { AIAgentsView } from './views/AIAgentsView';
 import { AnalyticsView } from './views/AnalyticsView';
@@ -33,11 +34,14 @@ export const App: React.FC = () => {
   });
 
   const [currentTab, setCurrentTab] = useState<TabType>('dashboard');
+  // The seeded showcase account (amonthet5@gmail.com) gets the demo data via
+  // handleLoginSuccess below; every other account starts clean — real data
+  // loads in from the backend once logged in, not fabricated numbers.
   const [connections, setConnections] = useState<PlatformConnection[]>(
-    () => (user.isLoggedIn ? initialConnections : emptyConnections)
+    () => (user.isLoggedIn && user.email === 'amonthet5@gmail.com' ? initialConnections : emptyConnections)
   );
-  const [posts, setPosts] = useState<SocialPost[]>(() => (user.isLoggedIn ? initialPosts : []));
-  const [messages, setMessages] = useState<CustomerMessage[]>(() => (user.isLoggedIn ? initialMessages : []));
+  const [posts, setPosts] = useState<SocialPost[]>(() => (user.isLoggedIn && user.email === 'amonthet5@gmail.com' ? initialPosts : []));
+  const [messages, setMessages] = useState<CustomerMessage[]>(() => (user.isLoggedIn && user.email === 'amonthet5@gmail.com' ? initialMessages : []));
   const [agents] = useState<AIAgent[]>(initialAIAgents);
 
   // Modals
@@ -82,7 +86,35 @@ export const App: React.FC = () => {
     }
 
     fetchRealConnections();
+    loadPosts();
+    loadMessages();
   }, [user.isLoggedIn, user.id]);
+
+  const loadMessages = async () => {
+    const token = localStorage.getItem('pinkku_token');
+    if (!token) return;
+    try {
+      const res = await fetch('/api/messages', { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return;
+      const data = await res.json();
+      setMessages(data.messages || []);
+    } catch {
+      // Real messages are a progressive enhancement — silently ignore if unreachable.
+    }
+  };
+
+  const loadPosts = async () => {
+    const token = localStorage.getItem('pinkku_token');
+    if (!token) return;
+    try {
+      const res = await fetch('/api/posts', { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return;
+      const data = await res.json();
+      setPosts(data.posts || []);
+    } catch {
+      // Posts are a progressive enhancement — silently ignore if unreachable.
+    }
+  };
 
   const fetchRealConnections = async () => {
     const token = localStorage.getItem('pinkku_token');
@@ -96,16 +128,19 @@ export const App: React.FC = () => {
       setConnections(prev => prev.map(c => {
         const match = real.find(r => r.platform === c.id);
         if (match) {
+          // followerCount isn't returned by any real integration yet — reset the
+          // seeded demo number rather than showing a number that was never real.
           return {
             ...c,
             connected: true,
             accountName: match.accountName || match.accountEmail,
             handle: match.accountEmail,
             lastSynced: 'Just now',
+            followerCount: 0,
           };
         }
         if (REAL_PLATFORMS.includes(c.id)) {
-          return { ...c, connected: false, accountName: undefined, handle: undefined };
+          return { ...c, connected: false, accountName: undefined, handle: undefined, followerCount: 0 };
         }
         return c;
       }));
@@ -204,21 +239,88 @@ export const App: React.FC = () => {
     setConnections(prev => prev.map(c => ({ ...c, lastSynced: 'Just now' })));
   };
 
-  const handleSavePost = (newPost: SocialPost) => {
-    setPosts(prev => [newPost, ...prev]);
+  const handleSavePost = async (newPost: Omit<SocialPost, 'id' | 'createdAt'>) => {
+    const token = localStorage.getItem('pinkku_token');
+    try {
+      const res = await fetch('/api/posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(newPost),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPosts(prev => [{ ...newPost, id: data.id, createdAt: new Date().toISOString().split('T')[0] }, ...prev]);
+      }
+    } catch {
+      // Post creation failed silently — the Content Studio's own saved-state stays unset, so the user can retry.
+    }
   };
 
-  const handleUpdateMessage = (id: string, replyText: string) => {
-    setMessages(prev => prev.map(m => {
-      if (m.id === id) {
-        return {
-          ...m,
-          status: 'replied',
-          suggestedReplyMyanmar: replyText
-        };
-      }
-      return m;
-    }));
+  const handleSubmitForReview = async (id: string) => {
+    const token = localStorage.getItem('pinkku_token');
+    setPosts(prev => prev.map(p => (p.id === id ? { ...p, status: 'pending_review' } : p)));
+    try {
+      await fetch(`/api/posts/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: 'pending_review' }),
+      });
+    } catch {
+      // optimistic update already applied
+    }
+  };
+
+  const handleApprovePost = async (id: string, date: string, time: string) => {
+    const token = localStorage.getItem('pinkku_token');
+    setPosts(prev => prev.map(p => (p.id === id ? { ...p, status: 'scheduled', scheduledDate: date, scheduledTime: time } : p)));
+    try {
+      await fetch(`/api/posts/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: 'scheduled', scheduledDate: date, scheduledTime: time }),
+      });
+    } catch {
+      // optimistic update already applied
+    }
+  };
+
+  const handleRequestChanges = async (id: string) => {
+    const token = localStorage.getItem('pinkku_token');
+    setPosts(prev => prev.map(p => (p.id === id ? { ...p, status: 'draft' } : p)));
+    try {
+      await fetch(`/api/posts/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: 'draft' }),
+      });
+    } catch {
+      // optimistic update already applied
+    }
+  };
+
+  const handleDeleteDraft = async (id: string) => {
+    const token = localStorage.getItem('pinkku_token');
+    setPosts(prev => prev.filter(p => p.id !== id));
+    try {
+      await fetch(`/api/posts/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    } catch {
+      // optimistic update already applied
+    }
+  };
+
+  const handleUpdateMessage = async (id: string, replyText: string) => {
+    setMessages(prev => prev.map(m => (m.id === id ? { ...m, status: 'replied', suggestedReplyMyanmar: replyText } : m)));
+
+    const token = localStorage.getItem('pinkku_token');
+    try {
+      await fetch(`/api/messages/${id}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ replyText }),
+      });
+    } catch {
+      // optimistic update already applied; real sends beyond Telegram aren't wired up yet
+    }
   };
 
   const unreadMessagesCount = messages.filter(m => m.status === 'unread').length;
@@ -248,7 +350,7 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
+    <div className="min-h-screen bg-gradient-to-br from-pink-50/50 via-slate-50 to-rose-50/40 text-slate-900 flex flex-col">
       {/* Top Navbar */}
       <Navbar
         user={user}
@@ -281,6 +383,7 @@ export const App: React.FC = () => {
           currentTab={currentTab}
           onSelectTab={setCurrentTab}
           unreadMessagesCount={unreadMessagesCount}
+          connections={connections}
         />
 
         <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
@@ -307,6 +410,10 @@ export const App: React.FC = () => {
             <ContentCalendarView
               posts={posts}
               onCreatePost={() => setCurrentTab('creator')}
+              onSubmitForReview={handleSubmitForReview}
+              onApprovePost={handleApprovePost}
+              onRequestChanges={handleRequestChanges}
+              onDeleteDraft={handleDeleteDraft}
             />
           )}
 
@@ -328,7 +435,11 @@ export const App: React.FC = () => {
           )}
 
           {currentTab === 'gmail' && (
-            <GmailAIView user={user} onSelectTab={setCurrentTab} />
+            <GmailAIView user={user} onSelectTab={setCurrentTab} onDisconnected={fetchRealConnections} />
+          )}
+
+          {currentTab === 'schedule' && (
+            <AISmartScheduleView user={user} onSelectTab={setCurrentTab} />
           )}
 
           {currentTab === 'tiktok' && (

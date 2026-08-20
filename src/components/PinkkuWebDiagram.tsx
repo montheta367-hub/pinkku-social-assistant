@@ -1,5 +1,6 @@
 import React from 'react';
 import { PlatformLogo } from './PlatformLogo';
+import pinkkuIcon from '../assets/pinkku-icon.png';
 
 interface PinkkuWebDiagramProps {
   variant?: 'hero' | 'mini';
@@ -15,6 +16,13 @@ const NODES: { id: string; label: string; x: number; y: number }[] = [
   { id: 'gmail', label: 'Gmail', x: 100, y: 235 },
 ];
 
+// Shorter, dashed "room to grow" spokes in the gaps between platform nodes —
+// signals more integrations are coming, not a hard limit of 5.
+const MORE_SPOKES: { x: number; y: number }[] = [
+  { x: 388, y: 179 },
+  { x: 157, y: 346 },
+];
+
 const ringPoints = (scale: number) =>
   NODES.map((n) => {
     const x = 300 + (n.x - 300) * scale;
@@ -28,11 +36,14 @@ export const PinkkuWebDiagram: React.FC<PinkkuWebDiagramProps> = ({ variant = 'h
   return (
     <svg viewBox="0 0 600 560" className={className} style={{ overflow: 'visible' }}>
       <defs>
-        <radialGradient id="pinkkuCenterGrad" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="#FF6FA8" />
-          <stop offset="100%" stopColor="#E11D62" />
+        <radialGradient id="pinkkuBgGrad" cx="50%" cy="50%" r="65%">
+          <stop offset="0%" stopColor="#FFE4EF" />
+          <stop offset="100%" stopColor="#FFF7FA" />
         </radialGradient>
       </defs>
+
+      {/* soft pink backdrop instead of harsh white */}
+      <rect x={-20} y={-20} width={640} height={600} rx={28} fill="url(#pinkkuBgGrad)" />
 
       {/* faint web rings */}
       <polygon points={ringPoints(1)} fill="none" stroke="#FBCFE8" strokeWidth={1.2} opacity={0.7} />
@@ -42,6 +53,15 @@ export const PinkkuWebDiagram: React.FC<PinkkuWebDiagramProps> = ({ variant = 'h
       {/* spokes */}
       {NODES.map((n) => (
         <line key={`spoke-${n.id}`} x1={300} y1={300} x2={n.x} y2={n.y} stroke="#FCA5C7" strokeWidth={1.3} opacity={0.55} />
+      ))}
+
+      {/* extra dashed "room to grow" legs — Pinkku isn't limited to 5 apps */}
+      {MORE_SPOKES.map((s, i) => (
+        <g key={`more-${i}`} opacity={0.6}>
+          <line x1={300} y1={300} x2={s.x} y2={s.y} stroke="#FCA5C7" strokeWidth={1.3} strokeDasharray="4 4" />
+          <circle cx={s.x} cy={s.y} r={13} fill="#ffffff" stroke="#F1D9E4" strokeWidth={1.5} strokeDasharray="3 3" />
+          <text x={s.x} y={s.y + 4} textAnchor="middle" fontSize={13} fontWeight={800} fill="#FCA5C7">+</text>
+        </g>
       ))}
 
       {/* traveling pulses */}
@@ -56,18 +76,15 @@ export const PinkkuWebDiagram: React.FC<PinkkuWebDiagramProps> = ({ variant = 'h
         </circle>
       ))}
 
-      {/* center hub */}
+      {/* center hub — the real Pinkku spider */}
       <g style={{ transformOrigin: '300px 300px' }} className="pinkku-hub-breathe">
-        <circle cx={300} cy={300} r={54} fill="#FF2D85" opacity={0.1} />
-        <circle cx={300} cy={300} r={38} fill="url(#pinkkuCenterGrad)" />
-        <g stroke="#fff" strokeWidth={1.4} opacity={0.9}>
-          <line x1={300} y1={300} x2={300} y2={282} />
-          <line x1={300} y1={300} x2={315} y2={293} />
-          <line x1={300} y1={300} x2={310} y2={311} />
-          <line x1={300} y1={300} x2={290} y2={311} />
-          <line x1={300} y1={300} x2={285} y2={293} />
-        </g>
-        <circle cx={300} cy={300} r={6.5} fill="#fff" />
+        <circle cx={300} cy={300} r={58} fill="#FF2D85" opacity={0.12} />
+        <circle cx={300} cy={300} r={46} fill="#ffffff" />
+        <foreignObject x={262} y={262} width={76} height={76}>
+          <div style={{ width: 76, height: 76, borderRadius: '50%', overflow: 'hidden' }}>
+            <img src={pinkkuIcon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          </div>
+        </foreignObject>
       </g>
       {showLabels && (
         <text x={300} y={352} textAnchor="middle" fontFamily="inherit" fontWeight={800} fontSize={13} fill="#831843">

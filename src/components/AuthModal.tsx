@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Mail, Lock, User, Building, ArrowRight, Check, AlertCircle } from 'lucide-react';
 import { UserProfile } from '../types';
+import pinkkuIcon from '../assets/pinkku-icon.png';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -270,8 +271,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         </button>
 
         <div className="text-center space-y-1">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-tr from-pink-500 to-[#FF2D85] text-white shadow-lg shadow-pink-500/25 mb-2">
-            <span className="text-2xl">🌸</span>
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl overflow-hidden shadow-lg shadow-pink-500/25 mb-2">
+            <img src={pinkkuIcon} alt="Pinkku" className="w-full h-full object-cover" />
           </div>
           <h3 className="text-2xl font-black text-slate-900 tracking-tight">
             {mode === 'login' ? 'Welcome to Pinkku' : 'Register Your Business'}

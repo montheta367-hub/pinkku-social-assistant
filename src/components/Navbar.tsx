@@ -1,6 +1,7 @@
 import React from 'react';
 import { UserProfile } from '../types';
 import { Sparkles, Key, LogIn, LogOut, Bell, ShieldCheck } from 'lucide-react';
+import pinkkuIcon from '../assets/pinkku-icon.png';
 
 interface NavbarProps {
   user: UserProfile;
@@ -23,19 +24,8 @@ export const Navbar: React.FC<NavbarProps> = ({
         
         {/* Brand Logo */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500 via-[#FF2D85] to-rose-400 flex items-center justify-center text-white shadow-md shadow-pink-500/25">
-            <span className="text-xl">🌸</span>
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-black text-lg text-slate-900 tracking-tight">Pinkku</span>
-              <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-pink-100 text-[#FF2D85] border border-pink-200 tracking-wider">
-                Social Hub
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-500 font-semibold hidden sm:block">
-              Myanmar All-in-One AI Business Assistant
-            </p>
+          <div className="w-14 h-14 rounded-2xl overflow-hidden shadow-md shadow-pink-500/25 shrink-0">
+            <img src={pinkkuIcon} alt="Pinkku" className="w-full h-full object-cover" />
           </div>
         </div>
 

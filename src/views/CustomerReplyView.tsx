@@ -1,17 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CustomerMessage, UserProfile } from '../types';
 import { PlatformLogo } from '../components/PlatformLogo';
-import { 
-  MessageSquare, 
-  Sparkles, 
-  Send, 
-  CheckCircle2, 
-  RefreshCw, 
-  Check, 
-  CreditCard, 
-  Truck, 
+import {
+  MessageSquare,
+  Sparkles,
+  Send,
+  CheckCircle2,
+  RefreshCw,
+  Check,
+  CreditCard,
+  Truck,
   AlertCircle,
-  Copy
+  Copy,
+  Link as LinkIcon,
+  Zap
 } from 'lucide-react';
 
 interface CustomerReplyViewProps {
@@ -30,6 +32,47 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [sentSuccess, setSentSuccess] = useState(false);
+  const [telegramLink, setTelegramLink] = useState('');
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [autoReply, setAutoReply] = useState(false);
+  const [autoReplyLoading, setAutoReplyLoading] = useState(false);
+
+  useEffect(() => {
+    const token = localStorage.getItem('pinkku_token');
+    if (!token) return;
+    fetch('/api/connections/telegram/customer-link', { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => { if (data?.link) setTelegramLink(data.link); })
+      .catch(() => {});
+    fetch('/api/settings/telegram-auto-reply', { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => { if (data) setAutoReply(!!data.enabled); })
+      .catch(() => {});
+  }, []);
+
+  const handleCopyTelegramLink = () => {
+    navigator.clipboard.writeText(telegramLink);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  };
+
+  const handleToggleAutoReply = async () => {
+    const next = !autoReply;
+    setAutoReply(next);
+    setAutoReplyLoading(true);
+    const token = localStorage.getItem('pinkku_token');
+    try {
+      await fetch('/api/settings/telegram-auto-reply', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ enabled: next }),
+      });
+    } catch {
+      setAutoReply(!next);
+    } finally {
+      setAutoReplyLoading(false);
+    }
+  };
 
   const selectedMsg = messages.find(m => m.id === selectedMsgId) || messages[0];
 
@@ -96,8 +139,47 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
         </div>
       </div>
 
+      {telegramLink && (
+        <div className="bg-sky-50 border border-sky-200 rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2 text-xs font-bold text-sky-800 min-w-0">
+            <LinkIcon className="w-4 h-4 shrink-0" />
+            <span className="truncate">Share this link with customers so their Telegram messages land here: <span className="font-black">{telegramLink}</span></span>
+          </div>
+          <button
+            onClick={handleCopyTelegramLink}
+            className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[11px] font-bold flex items-center gap-1.5 shrink-0 self-start sm:self-auto"
+          >
+            {linkCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            <span>{linkCopied ? 'Copied!' : 'Copy Link'}</span>
+          </button>
+        </div>
+      )}
+
+      {telegramLink && (
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-3.5 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className={`p-1.5 rounded-lg ${autoReply ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-400'}`}>
+              <Zap className="w-3.5 h-3.5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-black text-slate-900">Auto Reply for Telegram</p>
+              <p className="text-[11px] text-slate-500 font-medium">
+                {autoReply ? 'AI replies to customers automatically, no review needed.' : 'AI drafts a reply — you review and send it manually.'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handleToggleAutoReply}
+            disabled={autoReplyLoading}
+            className={`relative shrink-0 w-11 h-6 rounded-full transition-colors disabled:opacity-50 ${autoReply ? 'bg-amber-500' : 'bg-slate-200'}`}
+          >
+            <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${autoReply ? 'translate-x-5' : ''}`} />
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
+
         {/* Messages List (Left Column) */}
         <div className="lg:col-span-5 bg-white rounded-3xl p-4 sm:p-5 border border-slate-200/80 shadow-sm space-y-3">
           <div className="flex items-center justify-between px-2 pb-2 border-b border-slate-100">

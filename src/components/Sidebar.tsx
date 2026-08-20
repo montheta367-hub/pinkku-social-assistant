@@ -10,8 +10,11 @@ import {
   BarChart3,
   Settings,
   Sparkles,
-  Music2
+  Music2,
+  CalendarClock
 } from 'lucide-react';
+import pinkkuIcon from '../assets/pinkku-icon.png';
+import { PlatformConnection } from '../types';
 
 export type TabType =
   | 'dashboard'
@@ -20,6 +23,7 @@ export type TabType =
   | 'messages'
   | 'connections'
   | 'gmail'
+  | 'schedule'
   | 'tiktok'
   | 'agents'
   | 'analytics'
@@ -29,13 +33,16 @@ interface SidebarProps {
   currentTab: TabType;
   onSelectTab: (tab: TabType) => void;
   unreadMessagesCount: number;
+  connections: PlatformConnection[];
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   currentTab,
   onSelectTab,
-  unreadMessagesCount
+  unreadMessagesCount,
+  connections
 }) => {
+  const connectedCount = connections.filter(c => c.connected).length;
   const menuItems = [
     { id: 'dashboard' as TabType, label: 'Overview', icon: LayoutDashboard },
     { id: 'creator' as TabType, label: 'AI Content Studio', icon: PenTool, badge: 'AI' },
@@ -43,6 +50,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'messages' as TabType, label: 'Customer DMs', icon: MessageSquare, count: unreadMessagesCount },
     { id: 'connections' as TabType, label: 'Spider Connect Hub', icon: Share2 },
     { id: 'gmail' as TabType, label: 'Google Business Inbox', icon: Mail },
+    { id: 'schedule' as TabType, label: 'AI Smart Schedule', icon: CalendarClock },
     { id: 'tiktok' as TabType, label: 'TikTok Management', icon: Music2 },
     { id: 'agents' as TabType, label: 'Autonomous AI Crew', icon: Bot, badge: 'New' },
     { id: 'analytics' as TabType, label: 'Growth Analytics', icon: BarChart3 },
@@ -50,7 +58,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   return (
-    <aside className="w-full md:w-64 shrink-0 bg-white border-r border-slate-200/80 p-4 space-y-6 flex flex-col justify-between">
+    <aside className="w-full md:w-64 shrink-0 bg-pink-50 border-r border-pink-200/70 p-4 space-y-6 flex flex-col justify-between">
       <div className="space-y-1">
         <div className="px-3 py-2 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
           Management
@@ -67,8 +75,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onClick={() => onSelectTab(item.id)}
                 className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all ${
                   isActive
-                    ? 'bg-pink-50 text-[#FF2D85] shadow-sm font-extrabold'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    ? 'bg-white text-[#FF2D85] shadow-sm font-extrabold'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                 }`}
               >
                 <div className="flex items-center gap-3">
@@ -99,17 +107,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Spider AI Assistant Banner */}
       <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 text-white space-y-2">
         <div className="flex items-center gap-2">
-          <span className="text-lg">🕷️</span>
+          <img src={pinkkuIcon} alt="" className="w-5 h-5 rounded-full object-cover" />
           <span className="text-xs font-black tracking-tight text-pink-300">Pinkku Spider Sync</span>
         </div>
         <p className="text-[11px] text-slate-300 leading-relaxed">
-          Auto-syncing Facebook, Instagram, TikTok, Telegram & Google accounts seamlessly.
+          Auto-syncing Gmail, TikTok & Telegram today — more channels coming soon.
         </p>
-        <div className="pt-1 flex items-center justify-between text-[10px] text-emerald-400 font-bold">
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-            All 5 Channels Active
-          </span>
+        <div className="pt-1 flex items-center justify-between text-[10px] font-bold">
+          {connectedCount > 0 ? (
+            <span className="flex items-center gap-1.5 text-emerald-400">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+              {connectedCount} Channel{connectedCount === 1 ? '' : 's'} Active
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 text-slate-400">
+              <span className="w-2 h-2 rounded-full bg-slate-500"></span>
+              No Channels Connected Yet
+            </span>
+          )}
         </div>
       </div>
     </aside>

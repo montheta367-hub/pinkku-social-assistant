@@ -1,11 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { SocialPost, PlatformType } from '../types';
 import { PlatformLogo } from '../components/PlatformLogo';
-import { Calendar, Plus, ChevronLeft, ChevronRight, Mail, CalendarPlus, CalendarCheck } from 'lucide-react';
+import { Calendar, Plus, ChevronLeft, ChevronRight, Mail, CalendarPlus, CalendarCheck, FileText, ClipboardCheck, Trash2, Undo2, Check } from 'lucide-react';
 
 interface ContentCalendarViewProps {
   posts: SocialPost[];
   onCreatePost: () => void;
+  onSubmitForReview: (id: string) => void;
+  onApprovePost: (id: string, date: string, time: string) => void;
+  onRequestChanges: (id: string) => void;
+  onDeleteDraft: (id: string) => void;
 }
 
 type Importance = 'urgent' | 'important' | 'normal' | 'low';
@@ -42,13 +46,22 @@ function getWeekStart(offset: number): Date {
   return monday;
 }
 
-export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({ posts, onCreatePost }) => {
+export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
+  posts, onCreatePost, onSubmitForReview, onApprovePost, onRequestChanges, onDeleteDraft
+}) => {
   const [filterPlatform, setFilterPlatform] = useState<string>("all");
   const [weekOffset, setWeekOffset] = useState(0);
   const [detectedEvents, setDetectedEvents] = useState<DetectedEvent[]>([]);
   const [detectedStatus, setDetectedStatus] = useState<'idle' | 'loading' | 'ready' | 'not_connected' | 'error'>('idle');
   const [addedEventIds, setAddedEventIds] = useState<Set<string>>(new Set());
   const [addingEventId, setAddingEventId] = useState<string | null>(null);
+  const [reviewSchedule, setReviewSchedule] = useState<Record<string, { date: string; time: string }>>({});
+
+  const draftPosts = posts.filter(p => p.status === 'draft');
+  const pendingReviewPosts = posts.filter(p => p.status === 'pending_review');
+  const scheduleFor = (id: string) => reviewSchedule[id] || { date: toISODate(new Date()), time: '18:00' };
+  const setScheduleFor = (id: string, patch: Partial<{ date: string; time: string }>) =>
+    setReviewSchedule(prev => ({ ...prev, [id]: { ...scheduleFor(id), ...patch } }));
 
   const filteredPosts = filterPlatform === "all"
     ? posts
@@ -145,6 +158,103 @@ export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({ posts,
           <span>New Post Schedule</span>
         </button>
       </div>
+
+      {/* Pending Review */}
+      {pendingReviewPosts.length > 0 && (
+        <div className="bg-white rounded-3xl p-4 sm:p-5 border border-amber-200/80 shadow-sm space-y-3">
+          <div className="flex items-center gap-2">
+            <ClipboardCheck className="w-4 h-4 text-amber-600" />
+            <span className="text-xs font-black text-slate-800">Pending Review ({pendingReviewPosts.length})</span>
+            <span className="text-[11px] text-slate-400 font-medium">— check AI-generated content before it goes out</span>
+          </div>
+          <div className="space-y-3">
+            {pendingReviewPosts.map(post => {
+              const sched = scheduleFor(post.id);
+              return (
+                <div key={post.id} className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/70 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        {post.platforms.map(p => <PlatformLogo key={p} platform={p} className="w-3.5 h-3.5" />)}
+                      </div>
+                      <p className="text-xs font-black text-slate-900">{post.title}</p>
+                      {post.myanmarContent && <p className="text-[11px] text-slate-600 font-medium mt-1 line-clamp-2">{post.myanmarContent}</p>}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="date"
+                      value={sched.date}
+                      onChange={e => setScheduleFor(post.id, { date: e.target.value })}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-[11px] font-bold text-slate-800"
+                    />
+                    <input
+                      type="time"
+                      value={sched.time}
+                      onChange={e => setScheduleFor(post.id, { time: e.target.value })}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-[11px] font-bold text-slate-800"
+                    />
+                    <button
+                      onClick={() => onApprovePost(post.id, sched.date, sched.time)}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold flex items-center gap-1.5"
+                    >
+                      <Check className="w-3.5 h-3.5" /> Approve &amp; Schedule
+                    </button>
+                    <button
+                      onClick={() => onRequestChanges(post.id)}
+                      className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 text-[11px] font-bold flex items-center gap-1.5"
+                    >
+                      <Undo2 className="w-3.5 h-3.5" /> Send Back to Draft
+                    </button>
+                    <button
+                      onClick={() => onDeleteDraft(post.id)}
+                      className="p-1.5 rounded-lg border border-slate-200 hover:bg-rose-50 hover:border-rose-300 text-slate-400 hover:text-rose-600"
+                      title="Delete post"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Drafts */}
+      {draftPosts.length > 0 && (
+        <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200/80 shadow-sm space-y-3">
+          <div className="flex items-center gap-2">
+            <FileText className="w-4 h-4 text-slate-500" />
+            <span className="text-xs font-black text-slate-800">Drafts ({draftPosts.length})</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {draftPosts.map(post => (
+              <div key={post.id} className="p-3.5 rounded-2xl bg-slate-50/70 border border-slate-200/70 space-y-2">
+                <div className="flex items-center gap-1.5">
+                  {post.platforms.map(p => <PlatformLogo key={p} platform={p} className="w-3.5 h-3.5" />)}
+                </div>
+                <p className="text-xs font-black text-slate-900 line-clamp-1">{post.title}</p>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    onClick={() => onSubmitForReview(post.id)}
+                    className="flex-1 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold flex items-center justify-center gap-1"
+                  >
+                    <ClipboardCheck className="w-3 h-3" /> Submit for Review
+                  </button>
+                  <button
+                    onClick={() => onDeleteDraft(post.id)}
+                    className="p-1.5 rounded-lg border border-slate-200 hover:bg-rose-50 hover:border-rose-300 text-slate-400 hover:text-rose-600"
+                    title="Delete draft"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {detectedStatus === 'not_connected' && (
         <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-3.5 flex items-center gap-2 text-xs font-bold text-indigo-700">

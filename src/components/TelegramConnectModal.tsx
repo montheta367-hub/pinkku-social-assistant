@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Send, AlertCircle, CheckCircle2, ExternalLink } from 'lucide-react';
+import { X, Send, AlertCircle, CheckCircle2, ExternalLink, ShieldCheck } from 'lucide-react';
 
 interface TelegramConnectModalProps {
   isOpen: boolean;
@@ -7,19 +7,25 @@ interface TelegramConnectModalProps {
   onConnected: (accountName: string) => void;
 }
 
-type Stage = 'starting' | 'waiting' | 'connected' | 'error';
+type Stage = 'confirm' | 'starting' | 'waiting' | 'connected' | 'error';
 
 export const TelegramConnectModal: React.FC<TelegramConnectModalProps> = ({ isOpen, onClose, onConnected }) => {
-  const [stage, setStage] = useState<Stage>('starting');
+  const [stage, setStage] = useState<Stage>('confirm');
   const [deepLink, setDeepLink] = useState('');
   const [error, setError] = useState('');
   const pollRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
-
-    setStage('starting');
+    setStage('confirm');
     setError('');
+    return () => {
+      if (pollRef.current) window.clearInterval(pollRef.current);
+    };
+  }, [isOpen]);
+
+  const handleContinue = () => {
+    setStage('starting');
     let code = '';
 
     const start = async () => {
@@ -63,11 +69,7 @@ export const TelegramConnectModal: React.FC<TelegramConnectModalProps> = ({ isOp
     };
 
     start();
-
-    return () => {
-      if (pollRef.current) window.clearInterval(pollRef.current);
-    };
-  }, [isOpen]);
+  };
 
   if (!isOpen) return null;
 
@@ -84,6 +86,43 @@ export const TelegramConnectModal: React.FC<TelegramConnectModalProps> = ({ isOp
         <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-tr from-sky-400 to-sky-600 text-white shadow-lg shadow-sky-500/25">
           <Send className="w-6 h-6" />
         </div>
+
+        {stage === 'confirm' && (
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <h3 className="text-xl font-black text-slate-900 tracking-tight">Connect your Telegram Account</h3>
+              <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                To securely connect your Telegram account, Pinkku will open our Telegram bot.
+              </p>
+            </div>
+
+            <ol className="text-left text-xs text-slate-600 font-medium space-y-1.5 bg-slate-50 rounded-2xl p-4">
+              <li>1. Telegram will open</li>
+              <li>2. A secure connection code will appear</li>
+              <li>3. Press Send to confirm the connection</li>
+            </ol>
+
+            <p className="flex items-center justify-center gap-1.5 text-[11px] font-bold text-emerald-600">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>No password is required.</span>
+            </p>
+
+            <div className="flex gap-2">
+              <button
+                onClick={onClose}
+                className="flex-1 py-3 px-4 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleContinue}
+                className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-sky-500 to-sky-600 text-white font-extrabold text-xs shadow-md shadow-sky-500/20 hover:opacity-95 transition-all"
+              >
+                Continue to Telegram
+              </button>
+            </div>
+          </div>
+        )}
 
         {stage === 'starting' && (
           <div className="space-y-1">

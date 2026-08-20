@@ -13,6 +13,13 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Several routes below do `if (error) throw error` inside an async handler
+// without a try/catch. Without this, any single failed Supabase query (e.g. a
+// missing table) crashes the entire process for every connected user.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
+
 app.use(cors());
 app.use(express.json());
 
@@ -21,9 +28,9 @@ app.use(express.json());
 // via the Supabase SQL Editor; this client just talks to it over HTTPS)
 // ---------------------------------------------------------------------------
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseKey = process.env.SUPABASE_SECRET_KEY;
 if (!supabaseUrl || !supabaseKey) {
-  throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in .env');
+  throw new Error('SUPABASE_URL and SUPABASE_SECRET_KEY must be set in .env');
 }
 const db = createClient(supabaseUrl, supabaseKey);
 
@@ -240,6 +247,31 @@ function getGemini(): GoogleGenAI {
   return geminiClient;
 }
 
+// Gemini's free tier has a low requests-per-minute cap, and this app fires
+// several calls in quick succession (inbox triage, per-page analysis, reply
+// drafting). Without a retry, a transient 429 makes email importance fall
+// back to "normal" for everything and leaves the AI draft box empty — retry
+// with backoff so a single rate-limit blip doesn't wipe out real results.
+async function generateContentWithRetry(
+  ai: GoogleGenAI,
+  params: Parameters<GoogleGenAI['models']['generateContent']>[0],
+  retries = 3
+): Promise<Awaited<ReturnType<GoogleGenAI['models']['generateContent']>>> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await ai.models.generateContent(params);
+    } catch (err: any) {
+      const message = String(err?.message || err);
+      const isRateLimit = err?.status === 429 || /429|RESOURCE_EXHAUSTED|rate limit/i.test(message);
+      if (isRateLimit && attempt < retries) {
+        await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Authentication Endpoints
 // ---------------------------------------------------------------------------
@@ -366,6 +398,9 @@ const GOOGLE_SCOPES = [
   'profile',
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.send',
+  // Needed to move a message out of Spam (remove the SPAM label) — read-only
+  // access can't do that.
+  'https://www.googleapis.com/auth/gmail.modify',
   'https://www.googleapis.com/auth/calendar.events',
 ].join(' ');
 
@@ -621,11 +656,10 @@ app.post('/api/oauth/tiktok/start', requireAuth, async (req: AuthedRequest, res)
 
   const url = new URL('https://www.tiktok.com/v2/auth/authorize/');
   url.searchParams.set('client_key', clientKey);
-  // user.info.basic (Login Kit) + user.info.stats (Display API) — both products are
-  // added to this app. video.publish/video.upload (Content Posting API) are left out:
-  // nothing here calls them yet, and requesting unapproved scopes makes TikTok silently
-  // reject the whole authorization request.
-  url.searchParams.set('scope', 'user.info.basic,user.info.stats');
+  // Only user.info.basic (Login Kit) is actually approved for this app —
+  // user.info.stats (Display API) rejects the whole authorization request
+  // with a "scope" error, so it's left out until that product is approved.
+  url.searchParams.set('scope', 'user.info.basic');
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('redirect_uri', TIKTOK_REDIRECT_URI);
   url.searchParams.set('state', state);
@@ -782,9 +816,11 @@ app.get('/api/tiktok/status', requireAuth, async (req: AuthedRequest, res) => {
 
   try {
     const userRes = await fetch(
-      // "username" needs the separate user.info.profile scope, which isn't requested —
-      // TikTok rejects the whole call if an unauthorized field is asked for.
-      'https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,avatar_url,follower_count,following_count,video_count',
+      // Only fields covered by the approved user.info.basic scope — "username"
+      // (user.info.profile) and follower/following/video counts (user.info.stats)
+      // aren't approved for this app yet, and TikTok rejects the whole call if
+      // an unauthorized field is asked for.
+      'https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,avatar_url',
       { headers: { Authorization: `Bearer ${token.accessToken}` } }
     );
     const userData: any = await userRes.json();
@@ -871,7 +907,7 @@ Output strictly a JSON object:
   "tips": ["3-4 concrete, specific tips for making THIS video attractive and getting more views — not generic advice"]
 }`;
 
-    const response = await ai.models.generateContent({
+    const response = await generateContentWithRetry(ai, {
       model: 'gemini-flash-lite-latest',
       contents: prompt,
       config: { responseMimeType: 'application/json' },
@@ -937,8 +973,78 @@ app.get('/api/connections/telegram/status', requireAuth, async (req: AuthedReque
   return res.json({ connected: !!row, accountName: row?.account_name });
 });
 
-// Long-polls Telegram's getUpdates for incoming /start <code> messages and
-// links whichever Pinkku account requested that code.
+// A business's permanent, shareable link — a customer who opens this and hits
+// Send registers as a contact of this business (distinct from the one-time
+// codes above, which link the business owner's own account).
+app.get('/api/connections/telegram/customer-link', requireAuth, async (req: AuthedRequest, res) => {
+  if (!process.env.TELEGRAM_BOT_TOKEN) {
+    return res.status(503).json({ error: 'Telegram is not configured yet. Add TELEGRAM_BOT_TOKEN to .env.' });
+  }
+  const username = await getTelegramBotUsername();
+  if (!username) {
+    return res.status(502).json({ error: 'Could not reach Telegram to build the link.' });
+  }
+  return res.json({ link: `https://t.me/${username}?start=biz_${req.user!.id}` });
+});
+
+// Toggle: when enabled, incoming Telegram customer messages get an AI-drafted
+// reply sent automatically instead of waiting for the owner to review and send.
+app.get('/api/settings/telegram-auto-reply', requireAuth, async (req: AuthedRequest, res) => {
+  const { data, error } = await db.from('users').select('telegram_auto_reply').eq('id', req.user!.id).maybeSingle();
+  if (error) return res.status(500).json({ error: 'Could not load this setting.' });
+  return res.json({ enabled: !!data?.telegram_auto_reply });
+});
+
+app.patch('/api/settings/telegram-auto-reply', requireAuth, async (req: AuthedRequest, res) => {
+  const { enabled } = req.body;
+  const { error } = await db.from('users').update({ telegram_auto_reply: !!enabled }).eq('id', req.user!.id);
+  if (error) return res.status(500).json({ error: 'Could not save this setting.' });
+  return res.json({ success: true, enabled: !!enabled });
+});
+
+function sendTelegramMessage(botToken: string, chatId: string | number, text: string) {
+  return fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text }),
+  }).catch(() => {});
+}
+
+// Scans a single Telegram customer message for a task/event/deadline —
+// feeds straight into AI Smart Schedule (schedule_events) alongside
+// whatever's detected from Gmail, same "Smart Workspace".
+async function detectEventInMessage(text: string, fromName: string): Promise<{
+  eventDetected: boolean; eventTitle?: string; eventDate?: string; eventTime?: string | null; importance?: string;
+} | null> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const ai = getGemini();
+    const today = new Date().toISOString().slice(0, 10);
+    const prompt = `Today's date is ${today}. A Telegram message from "${fromName}" says: "${text}"
+
+Does this message contain a specific, real, dated task, deadline, meeting, or event the business owner needs to act on or attend? Ignore generic questions (e.g. "what do you sell", "price?") that have no actual date attached.
+
+Output strictly a JSON object: { "eventDetected": boolean, "eventTitle": string|null, "eventDate": string|null (YYYY-MM-DD, resolve relative dates like "tomorrow" or "Friday" using today's date), "eventTime": string|null (24h HH:MM, or null), "importance": "urgent"|"important"|"normal"|"low" }`;
+
+    const response = await generateContentWithRetry(ai, {
+      model: 'gemini-flash-lite-latest',
+      contents: prompt,
+      config: { responseMimeType: 'application/json' },
+    });
+    return JSON.parse(response.text);
+  } catch (err) {
+    console.error('[telegram] event detection failed:', err);
+    return null;
+  }
+}
+
+// Long-polls Telegram's getUpdates for two kinds of incoming messages:
+// 1. /start <code> — a business owner linking their own Pinkku account (existing flow).
+// 2. /start biz_<userId> — a customer registering as a contact of that business.
+// 3. Any other message from a chat already registered as a customer contact —
+//    routed into that business's Customer DMs inbox.
 let telegramUpdateOffset = 0;
 async function pollTelegramUpdates() {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -958,31 +1064,127 @@ async function pollTelegramUpdates() {
         telegramUpdateOffset = update.update_id + 1;
         const msg = update.message;
         const text: string | undefined = msg?.text;
-        if (!msg || !text || !text.startsWith('/start')) continue;
+        if (!msg || !text) continue;
 
-        const code = text.split(' ')[1];
-        if (!code) continue;
+        const chatId = String(msg.chat.id);
+        const customerName = msg.from.username ? `@${msg.from.username}` : msg.from.first_name;
 
-        const stateRow = await consumeOAuthState(code, 'telegram');
-        if (!stateRow) continue;
+        const isGroupChat = msg.chat.type === 'group' || msg.chat.type === 'supergroup';
 
-        const accountName = msg.from.username ? `@${msg.from.username}` : msg.from.first_name;
-        await upsertConnectedAccount({
-          user_id: stateRow.user_id,
+        if (text.startsWith('/start')) {
+          const code = text.split(' ')[1];
+          if (!code) continue;
+
+          if (code.startsWith('biz_')) {
+            const ownerUserId = code.slice(4);
+            const { data: owner } = await db.from('users').select('id').eq('id', ownerUserId).maybeSingle();
+            if (!owner) continue;
+
+            if (isGroupChat) {
+              // A group (e.g. a class or project chat) — feeds AI Smart Schedule
+              // only, never Customer DMs or auto-reply.
+              await db.from('telegram_groups').upsert({
+                chat_id: chatId, owner_user_id: ownerUserId, group_name: msg.chat.title || null, created_at: new Date().toISOString(),
+              });
+              await sendTelegramMessage(botToken, msg.chat.id, "📌 This group is now linked to Pinkku! I'll scan messages here for tasks, deadlines and events and add them to your AI Smart Schedule.");
+            } else {
+              await db.from('telegram_contacts').upsert({
+                chat_id: chatId, owner_user_id: ownerUserId, customer_name: customerName, created_at: new Date().toISOString(),
+              });
+              await sendTelegramMessage(botToken, msg.chat.id, "👋 You're connected! Send us a message here anytime and we'll get back to you.");
+            }
+          } else {
+            const stateRow = await consumeOAuthState(code, 'telegram');
+            if (!stateRow) continue;
+
+            await upsertConnectedAccount({
+              user_id: stateRow.user_id,
+              platform: 'telegram',
+              account_name: customerName,
+              external_id: chatId,
+              connected_at: new Date().toISOString(),
+            });
+            await sendTelegramMessage(botToken, msg.chat.id, "✅ You're connected to Pinkku! You'll get your customer messages routed here.");
+          }
+          continue;
+        }
+
+        // Group chats only ever feed the schedule detector — never Customer
+        // DMs, never auto-reply (that would be spammy toward classmates/teammates).
+        if (isGroupChat) {
+          const { data: group } = await db.from('telegram_groups').select('owner_user_id').eq('chat_id', chatId).maybeSingle();
+          if (!group) continue;
+
+          const detected = await detectEventInMessage(text, customerName);
+          if (detected?.eventDetected && detected.eventDate) {
+            await db.from('schedule_events').insert({
+              id: 'tg_' + randomUUID(),
+              user_id: group.owner_user_id,
+              title: detected.eventTitle || `From ${msg.chat.title || 'group'}`,
+              date: detected.eventDate,
+              time: detected.eventTime || null,
+              importance: detected.importance || 'normal',
+              source_subject: `Telegram Group (${msg.chat.title || 'group'}) — ${customerName}: ${text.slice(0, 120)}`,
+              manual: false,
+              created_at: new Date().toISOString(),
+            });
+          }
+          continue;
+        }
+
+        // Private chat, not a /start command — route it if this chat is a known customer contact.
+        const { data: contact } = await db.from('telegram_contacts').select('owner_user_id, customer_name').eq('chat_id', chatId).maybeSingle();
+        if (!contact) continue;
+
+        const { data: owner } = await db.from('users').select('business_name, telegram_auto_reply').eq('id', contact.owner_user_id).maybeSingle();
+        const finalCustomerName = contact.customer_name || customerName;
+        let status = 'unread';
+        let replyText: string | null = null;
+
+        if (owner?.telegram_auto_reply) {
+          try {
+            const reply = await generateAIReply({
+              customerMessage: text,
+              customerName: finalCustomerName,
+              platform: 'telegram',
+              businessName: owner.business_name,
+            });
+            replyText = reply.suggestedReplyMyanmar || reply.suggestedReplyEnglish || null;
+            if (replyText) {
+              await sendTelegramMessage(botToken, msg.chat.id, replyText);
+              status = 'replied';
+            }
+          } catch (err) {
+            console.error('[telegram] auto-reply generation failed:', err);
+          }
+        }
+
+        await db.from('customer_messages').insert({
+          id: 'msg_' + randomUUID(),
+          user_id: contact.owner_user_id,
           platform: 'telegram',
-          account_name: accountName,
-          external_id: String(msg.chat.id),
-          connected_at: new Date().toISOString(),
+          external_chat_id: chatId,
+          customer_name: finalCustomerName,
+          message: text,
+          status,
+          reply_text: replyText,
+          created_at: new Date().toISOString(),
         });
 
-        fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: msg.chat.id,
-            text: "✅ You're connected to Pinkku! You'll get your customer messages routed here.",
-          }),
-        }).catch(() => {});
+        const detected = await detectEventInMessage(text, finalCustomerName);
+        if (detected?.eventDetected && detected.eventDate) {
+          await db.from('schedule_events').insert({
+            id: 'tg_' + randomUUID(),
+            user_id: contact.owner_user_id,
+            title: detected.eventTitle || `Message from ${finalCustomerName}`,
+            date: detected.eventDate,
+            time: detected.eventTime || null,
+            importance: detected.importance || 'normal',
+            source_subject: `Telegram — ${finalCustomerName}: ${text.slice(0, 120)}`,
+            manual: false,
+            created_at: new Date().toISOString(),
+          });
+        }
       }
     }
   } catch (err) {
@@ -1119,6 +1321,81 @@ app.get('/api/gmail/messages', requireAuth, async (req: AuthedRequest, res) => {
   }
 });
 
+// Gmail's own spam filter can wrongly catch legitimate business emails —
+// this scans the Spam label so the AI importance triage can catch anything
+// that looks like it shouldn't be there.
+app.get('/api/gmail/spam', requireAuth, async (req: AuthedRequest, res) => {
+  const accessToken = await getValidGoogleAccessToken(req.user!.id);
+  if (!accessToken) {
+    return res.status(404).json({ error: 'Gmail is not connected for this account yet.' });
+  }
+
+  try {
+    const pageToken = typeof req.query.pageToken === 'string' ? req.query.pageToken : '';
+    const listUrl = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages');
+    listUrl.searchParams.set('maxResults', '20');
+    listUrl.searchParams.set('labelIds', 'SPAM');
+    if (pageToken) listUrl.searchParams.set('pageToken', pageToken);
+
+    const listRes = await fetch(listUrl.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+    const listData: any = await listRes.json();
+    if (!listRes.ok) {
+      return res.status(listRes.status).json({ error: listData.error?.message || 'Failed to list spam messages.' });
+    }
+
+    const messageStubs: { id: string }[] = listData.messages || [];
+    const messages = await Promise.all(messageStubs.map(async (stub) => {
+      const msgRes = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${stub.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      const msgData: any = await msgRes.json();
+      const headers = msgData.payload?.headers || [];
+      return {
+        id: msgData.id as string,
+        threadId: msgData.threadId as string,
+        from: gmailHeader(headers, 'From'),
+        subject: gmailHeader(headers, 'Subject') || '(no subject)',
+        date: gmailHeader(headers, 'Date'),
+        snippet: (msgData.snippet as string) || '',
+        unread: ((msgData.labelIds as string[]) || []).includes('UNREAD'),
+      };
+    }));
+
+    return res.json({ messages, nextPageToken: listData.nextPageToken || null });
+  } catch (err) {
+    console.error('[gmail] fetch spam error:', err);
+    return res.status(502).json({ error: 'Could not reach Gmail.' });
+  }
+});
+
+// Moves a message out of Spam and into the Inbox.
+app.post('/api/gmail/messages/:id/unspam', requireAuth, async (req: AuthedRequest, res) => {
+  const accessToken = await getValidGoogleAccessToken(req.user!.id);
+  if (!accessToken) {
+    return res.status(404).json({ error: 'Gmail is not connected for this account yet.' });
+  }
+
+  try {
+    const modRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${req.params.id}/modify`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ removeLabelIds: ['SPAM'], addLabelIds: ['INBOX'] }),
+      }
+    );
+    const modData: any = await modRes.json();
+    if (!modRes.ok) {
+      return res.status(modRes.status).json({ error: modData.error?.message || 'Failed to move this message out of Spam.' });
+    }
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[gmail] unspam error:', err);
+    return res.status(502).json({ error: 'Could not reach Gmail.' });
+  }
+});
+
 app.post('/api/gmail/send', requireAuth, async (req: AuthedRequest, res) => {
   const { to, subject, body, threadId } = req.body;
   if (!to || !subject || !body) {
@@ -1238,7 +1515,7 @@ ${JSON.stringify(enriched.map(m => ({ id: m.id, subject: m.subject, body: m.body
 
 Output strictly a JSON object: { "results": [ { "id": string, "importance": string, "eventDetected": boolean, "eventTitle": string|null, "eventDate": string|null, "eventTime": string|null } ] }. One entry per email, matching "id" exactly.`;
 
-    const response = await ai.models.generateContent({
+    const response = await generateContentWithRetry(ai, {
       model: 'gemini-flash-lite-latest',
       contents: prompt,
       config: { responseMimeType: 'application/json' },
@@ -1357,7 +1634,7 @@ ${JSON.stringify(messages.map(m => ({ id: m.id, subject: m.subject, body: m.body
 
 Output strictly a JSON object: { "results": [ { "id": string, "eventDetected": boolean, "eventTitle": string|null, "eventDate": string|null (YYYY-MM-DD, resolve relative dates using today's date), "eventTime": string|null (24h HH:MM, or null), "importance": "urgent"|"important"|"normal"|"low" } ] }. Only include entries where eventDetected is true.`;
 
-    const response = await ai.models.generateContent({
+    const response = await generateContentWithRetry(ai, {
       model: 'gemini-flash-lite-latest',
       contents: prompt,
       config: { responseMimeType: 'application/json' },
@@ -1382,6 +1659,207 @@ Output strictly a JSON object: { "results": [ { "id": string, "eventDetected": b
   } catch (err) {
     console.error('[calendar] detected-events error:', err);
     return res.status(502).json({ error: 'Could not analyze your inbox for events.' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// AI Smart Schedule — Pinkku's own in-app schedule (separate from Google
+// Calendar). Stores manually-added events, and a snapshot of any Gmail-detected
+// event the user has added, so both survive refresh/logout.
+// ---------------------------------------------------------------------------
+app.get('/api/schedule/events', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const { data, error } = await db.from('schedule_events').select('*').eq('user_id', req.user!.id);
+    if (error) throw error;
+    return res.json({
+      events: (data || []).map(r => ({
+        id: r.id,
+        title: r.title,
+        date: r.date,
+        time: r.time,
+        importance: r.importance,
+        sourceSubject: r.source_subject || '',
+        manual: !!r.manual,
+      })),
+    });
+  } catch (err) {
+    console.error('[schedule] list error:', err);
+    return res.status(500).json({ error: 'Could not load your schedule.' });
+  }
+});
+
+app.post('/api/schedule/events', requireAuth, async (req: AuthedRequest, res) => {
+  const { id, title, date, time, importance, sourceSubject, manual } = req.body;
+  if (!title || !String(title).trim()) return res.status(400).json({ error: 'title is required.' });
+  if (!date) return res.status(400).json({ error: 'date is required.' });
+
+  const eventId = id || `manual_${randomUUID()}`;
+  try {
+    const { error } = await db.from('schedule_events').upsert({
+      id: eventId,
+      user_id: req.user!.id,
+      title,
+      date,
+      time: time || null,
+      importance: importance || 'normal',
+      source_subject: sourceSubject || null,
+      manual: !!manual,
+      created_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,id' });
+    if (error) throw error;
+    return res.json({ success: true, id: eventId });
+  } catch (err) {
+    console.error('[schedule] save error:', err);
+    return res.status(500).json({ error: 'Could not save this event to your schedule.' });
+  }
+});
+
+app.delete('/api/schedule/events/:id', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    await db.from('schedule_events').delete().eq('user_id', req.user!.id).eq('id', req.params.id);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[schedule] delete error:', err);
+    return res.status(500).json({ error: 'Could not remove this event.' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Posts — persisted content with a solo-review workflow:
+// draft -> pending_review -> scheduled -> published.
+// ---------------------------------------------------------------------------
+function toPostResponse(r: any) {
+  return {
+    id: r.id,
+    title: r.title,
+    content: r.content,
+    myanmarContent: r.myanmar_content || undefined,
+    platforms: JSON.parse(r.platforms || '[]'),
+    scheduledDate: r.scheduled_date || undefined,
+    scheduledTime: r.scheduled_time || undefined,
+    status: r.status,
+    tone: r.tone || undefined,
+    tags: r.tags ? JSON.parse(r.tags) : undefined,
+    createdAt: r.created_at,
+  };
+}
+
+app.get('/api/posts', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const { data, error } = await db.from('posts').select('*').eq('user_id', req.user!.id).order('created_at', { ascending: false });
+    if (error) throw error;
+    return res.json({ posts: (data || []).map(toPostResponse) });
+  } catch (err) {
+    console.error('[posts] list error:', err);
+    return res.status(500).json({ error: 'Could not load your posts.' });
+  }
+});
+
+app.post('/api/posts', requireAuth, async (req: AuthedRequest, res) => {
+  const { title, content, myanmarContent, platforms, status, tone, tags } = req.body;
+  if (!title || !String(title).trim()) return res.status(400).json({ error: 'title is required.' });
+  if (!Array.isArray(platforms) || platforms.length === 0) return res.status(400).json({ error: 'At least one platform is required.' });
+
+  const id = 'post_' + randomUUID();
+  const now = new Date().toISOString();
+  try {
+    const { error } = await db.from('posts').insert({
+      id,
+      user_id: req.user!.id,
+      title,
+      content: content || '',
+      myanmar_content: myanmarContent || null,
+      platforms: JSON.stringify(platforms),
+      status: status === 'pending_review' ? 'pending_review' : 'draft',
+      tone: tone || null,
+      tags: tags ? JSON.stringify(tags) : null,
+      created_at: now,
+      updated_at: now,
+    });
+    if (error) throw error;
+    return res.json({ success: true, id });
+  } catch (err) {
+    console.error('[posts] create error:', err);
+    return res.status(500).json({ error: 'Could not save this post.' });
+  }
+});
+
+app.patch('/api/posts/:id', requireAuth, async (req: AuthedRequest, res) => {
+  const { title, content, myanmarContent, status, scheduledDate, scheduledTime } = req.body;
+  const patch: Record<string, any> = { updated_at: new Date().toISOString() };
+  if (title !== undefined) patch.title = title;
+  if (content !== undefined) patch.content = content;
+  if (myanmarContent !== undefined) patch.myanmar_content = myanmarContent;
+  if (status !== undefined) patch.status = status;
+  if (scheduledDate !== undefined) patch.scheduled_date = scheduledDate;
+  if (scheduledTime !== undefined) patch.scheduled_time = scheduledTime;
+
+  try {
+    const { error } = await db.from('posts').update(patch).eq('user_id', req.user!.id).eq('id', req.params.id);
+    if (error) throw error;
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[posts] update error:', err);
+    return res.status(500).json({ error: 'Could not update this post.' });
+  }
+});
+
+app.delete('/api/posts/:id', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    await db.from('posts').delete().eq('user_id', req.user!.id).eq('id', req.params.id);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[posts] delete error:', err);
+    return res.status(500).json({ error: 'Could not remove this post.' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Customer Messages — real inbound messages (currently Telegram, routed via
+// telegram_contacts above) shown in the Customer DMs inbox.
+// ---------------------------------------------------------------------------
+app.get('/api/messages', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const { data, error } = await db.from('customer_messages').select('*').eq('user_id', req.user!.id).order('created_at', { ascending: false });
+    if (error) throw error;
+    return res.json({
+      messages: (data || []).map(r => ({
+        id: r.id,
+        customerName: r.customer_name,
+        platform: r.platform,
+        message: r.message,
+        timestamp: r.created_at,
+        status: r.status,
+        suggestedReplyMyanmar: r.reply_text || undefined,
+      })),
+    });
+  } catch (err) {
+    console.error('[messages] list error:', err);
+    return res.status(500).json({ error: 'Could not load your messages.' });
+  }
+});
+
+app.post('/api/messages/:id/reply', requireAuth, async (req: AuthedRequest, res) => {
+  const { replyText } = req.body;
+  if (!replyText || !String(replyText).trim()) return res.status(400).json({ error: 'replyText is required.' });
+
+  try {
+    const { data: row, error: fetchError } = await db.from('customer_messages').select('*').eq('user_id', req.user!.id).eq('id', req.params.id).maybeSingle();
+    if (fetchError) throw fetchError;
+    if (!row) return res.status(404).json({ error: 'Message not found.' });
+
+    if (row.platform === 'telegram' && row.external_chat_id) {
+      const botToken = process.env.TELEGRAM_BOT_TOKEN;
+      if (botToken) await sendTelegramMessage(botToken, row.external_chat_id, replyText);
+    }
+
+    const { error: updateError } = await db.from('customer_messages').update({ status: 'replied' }).eq('user_id', req.user!.id).eq('id', req.params.id);
+    if (updateError) throw updateError;
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[messages] reply error:', err);
+    return res.status(500).json({ error: 'Could not send this reply.' });
   }
 });
 
@@ -1418,7 +1896,7 @@ Please output a valid JSON object with the following fields:
 
 Output strictly valid JSON only.`;
 
-    const response = await ai.models.generateContent({
+    const response = await generateContentWithRetry(ai, {
       model: 'gemini-flash-lite-latest',
       contents: prompt,
       config: {
@@ -1439,42 +1917,112 @@ Output strictly valid JSON only.`;
 });
 
 // AI Customer Reply Endpoint
-app.post('/api/ai/generate-reply', async (req, res) => {
-  try {
-    const { customerMessage, customerName, platform, businessName } = req.body;
-    const apiKey = process.env.GEMINI_API_KEY;
+interface GenerateReplyParams {
+  customerMessage: string;
+  customerName?: string;
+  platform?: string;
+  businessName?: string;
+  senderName?: string;
+}
 
-    if (!apiKey) {
-      return res.json({
-        suggestedReplyMyanmar: `မင်္ဂလာပါရှင် ${customerName || 'customer'} ရှင့်။ မေးမြန်းပေးတဲ့အတွက် ကျေးဇူးတင်ပါတယ်ရှင်။ ပစ္စည်း ready stock ရှိပြီး ရန်ကုန်မြို့တွင်းဆိုရင် (၁-၂) ရက်အတွင်း အိမ်အရောက် ပို့ဆောင်ပေးပါတယ်ရှင်။ မှာယူလိုပါက အမည်၊ ဖုန်းနံပါတ်နှင့် လိပ်စာလေး ပေးပို့ပေးပါနော်။`,
-        suggestedReplyEnglish: `Hello ${customerName || 'Customer'}! Thank you for reaching out. The item is in stock and we can deliver within 1-2 days. Please provide your name, phone number and delivery address to confirm the order.`
-      });
-    }
+// Shared by the manual "AI Drafted Response" endpoint and the Telegram
+// auto-reply poller, so both produce the exact same kind of reply.
+async function generateAIReply(params: GenerateReplyParams): Promise<any> {
+  const { customerMessage, customerName, platform, businessName, senderName } = params;
+  const apiKey = process.env.GEMINI_API_KEY;
+  const signOffName = senderName || businessName || 'Pinkku';
+  const isEmail = (platform || '').toLowerCase() === 'gmail';
 
-    const ai = getGemini();
-    const prompt = `You are a polite, helpful customer service representative for a Myanmar business named "${businessName || 'Pinkku'}".
+  // Gmail inbox mail isn't always a sales inquiry (security alerts, event
+  // reminders, job postings, etc.), so its fallback stays a neutral
+  // acknowledgment rather than assuming stock/delivery like the Telegram
+  // customer-chat fallback below, which is written for a shop's DMs.
+  const fallbackReply = () => (isEmail ? {
+    suggestedReplyMyanmar: `မင်္ဂလာပါရှင် ${customerName || 'customer'} ရှင့်။ ဒီအီးမေးလ်ကို လက်ခံရရှိပါပြီရှင်။ အသေးစိတ်ကို ဖတ်ရှုပြီး မကြာမီ ပြန်လည်ဆက်သွယ်ပါ့မယ်ရှင်။`,
+    suggestedReplyEnglish: `Dear ${customerName || 'Valued Customer'},\n\nThank you for your email. I've received it and will follow up with a detailed response shortly.\n\nBest regards,\n${signOffName}`,
+  } : {
+    suggestedReplyMyanmar: `မင်္ဂလာပါရှင် ${customerName || 'customer'} ရှင့်။ မေးမြန်းပေးတဲ့အတွက် ကျေးဇူးတင်ပါတယ်ရှင်။ ပစ္စည်း ready stock ရှိပြီး ရန်ကုန်မြို့တွင်းဆိုရင် (၁-၂) ရက်အတွင်း အိမ်အရောက် ပို့ဆောင်ပေးပါတယ်ရှင်။ မှာယူလိုပါက အမည်၊ ဖုန်းနံပါတ်နှင့် လိပ်စာလေး ပေးပို့ပေးပါနော်။`,
+    suggestedReplyEnglish: `Hello ${customerName || 'Customer'}! Thank you for reaching out. The item is in stock and we can deliver within 1-2 days. Please provide your name, phone number and delivery address to confirm the order.`,
+  });
+
+  if (!apiKey) {
+    return fallbackReply();
+  }
+
+  const ai = getGemini();
+  const prompt = isEmail
+    ? `You are writing a professional business email reply on behalf of "${signOffName}" at "${businessName || 'Pinkku'}".
+Recipient Name: ${customerName || 'Valued Customer'}
+Original Email: "${customerMessage}"
+
+Write a formal English business email reply:
+- Start with "Dear ${customerName || 'Valued Customer'},"
+- Respond directly to the substance of their email — no generic filler greetings like "warm welcome" or "welcome to our workspace".
+- Close with a professional sign-off (e.g. "Best regards," or "Kind regards,") followed by "${signOffName}" on its own line.
+
+Return a valid JSON object with:
+- "suggestedReplyEnglish": The full formal email reply as described above.
+- "suggestedReplyMyanmar": A polite Burmese version of the same reply, adapted naturally rather than translated word-for-word.
+- "sentiment": Sentiment of the sender (positive, question, urgent, neutral).
+- "orderIntent": boolean (true if the email is asking about buying, stock, or price).
+
+Output strictly valid JSON only.`
+    : `You are a polite, helpful customer service representative for a Myanmar business named "${businessName || 'Pinkku'}".
 Customer Name: ${customerName || 'Valued Customer'}
 Customer Platform: ${platform || 'Facebook Messenger'}
 Customer Inquiry: "${customerMessage}"
 
-Generate a helpful, super polite, and natural customer support reply.
+Generate a helpful, polite, natural customer support reply that responds directly to what the customer actually asked or said.
+
+Hard rule: never welcome the customer to the business/workspace, in any wording. Banned openers include (in any language or phrasing) "welcome to [business]", "[business] ကနေ ... ကြိုဆိုပါတယ်", "လှိုက်လှဲစွာ ကြိုဆိုပါတယ်", "နွေးထွေးစွာ ကြိုဆိုပါတယ်", or any sentence whose main point is greeting/welcoming rather than answering. The reply must start by engaging with the customer's actual message.
+Example — customer asks "ဘာတွေရောင်းလဲ" (what do you sell):
+- BAD: "မင်္ဂလာပါရှင်။ [Business] ကနေ လှိုက်လှဲစွာ ကြိုဆိုပါတယ်။ ဘာတွေရောင်းလဲဆိုတာ မေးမြန်းပေးတဲ့အတွက် ကျေးဇူးတင်ပါတယ်..."
+- GOOD: "မင်္ဂလာပါရှင်။ ကျွန်မတို့ဆီမှာ [specific products/services] တွေ ရောင်းချပေးနေပါတယ်ရှင်..."
+A short greeting word (မင်္ဂလာပါရှင်/ခင်ဗျာ) is fine, but it must be immediately followed by the actual answer, not a welcome statement.
+
 Return a valid JSON object with:
-- "suggestedReplyMyanmar": Ultra-polite Burmese text in natural spoken Unicode tone (e.g. using မင်္ဂလာပါရှင်/ခင်ဗျာ, နွေးထွေးစွာ ဖြေကြားပေးခြင်း).
+- "suggestedReplyMyanmar": Ultra-polite Burmese text in natural spoken Unicode tone, following the hard rule above.
 - "suggestedReplyEnglish": Clear English translation.
 - "sentiment": Sentiment of customer (positive, question, urgent, neutral).
 - "orderIntent": boolean (true if customer is asking about buying, stock, or price).
 
 Output strictly valid JSON only.`;
 
-    const response = await ai.models.generateContent({
+  let response: Awaited<ReturnType<typeof generateContentWithRetry>>;
+  try {
+    response = await generateContentWithRetry(ai, {
       model: 'gemini-flash-lite-latest',
       contents: prompt,
-      config: {
-        responseMimeType: 'application/json'
-      }
+      config: { responseMimeType: 'application/json' },
     });
+  } catch (err) {
+    console.error('[ai] generateAIReply failed after retries, using fallback reply:', err);
+    return fallbackReply();
+  }
 
-    const parsed = JSON.parse(response.text);
+  const parsed = JSON.parse(response.text);
+  if (!isEmail) {
+    // The model still slips into a "welcome to [business]" opener often
+    // enough that prompt instructions alone aren't reliable — strip it
+    // deterministically as a safety net.
+    parsed.suggestedReplyMyanmar = stripWelcomeOpener(parsed.suggestedReplyMyanmar);
+    parsed.suggestedReplyEnglish = stripWelcomeOpener(parsed.suggestedReplyEnglish);
+  }
+  return parsed;
+}
+
+function stripWelcomeOpener(text: string | undefined): string | undefined {
+  if (!text) return text;
+  const sentences = text.split(/(?<=[။.!?])\s+/);
+  while (sentences.length > 1 && /ကြိုဆို|welcome to\b/i.test(sentences[0])) {
+    sentences.shift();
+  }
+  return sentences.join(' ').trim();
+}
+
+app.post('/api/ai/generate-reply', async (req, res) => {
+  try {
+    const parsed = await generateAIReply(req.body);
     return res.json(parsed);
   } catch (error: any) {
     console.error('Gemini reply generation error:', error);

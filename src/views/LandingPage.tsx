@@ -12,13 +12,24 @@ import {
 } from 'lucide-react';
 import { PlatformLogo } from '../components/PlatformLogo';
 import { PinkkuWebDiagram } from '../components/PinkkuWebDiagram';
+import pinkkuIcon from '../assets/pinkku-icon.png';
+import pinkkuLogoFull from '../assets/pinkku-logo-full.png';
 
 interface LandingPageProps {
   onGetStarted: () => void;
   onLogin: () => void;
 }
 
-const PLATFORMS = ['facebook', 'instagram', 'tiktok', 'telegram', 'gmail'];
+// live: true for channels you can actually connect today. Facebook & Instagram
+// are on the roadmap but not live yet, so they're marked "Coming Soon" here
+// instead of implying every channel is available right now.
+const PLATFORMS = [
+  { id: 'gmail', live: true },
+  { id: 'tiktok', live: true },
+  { id: 'telegram', live: true },
+  { id: 'facebook', live: false },
+  { id: 'instagram', live: false },
+];
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin }) => {
   return (
@@ -28,14 +39,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
       <header className="sticky top-0 z-40 backdrop-blur-md bg-white/80 border-b border-pink-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500 to-[#FF2D85] text-white flex items-center justify-center shadow-lg shadow-pink-500/25">
-              <span className="text-xl">🕷️</span>
-            </div>
-            <div>
-              <span className="font-black text-xl text-slate-900 tracking-tight">Pinkku</span>
-              <span className="ml-2 text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-pink-100 text-[#FF2D85]">
-                AI Social Hub
-              </span>
+            <div className="w-14 h-14 rounded-2xl overflow-hidden shadow-lg shadow-pink-500/25 shrink-0">
+              <img src={pinkkuIcon} alt="Pinkku" className="w-full h-full object-cover" />
             </div>
           </div>
 
@@ -73,7 +78,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
           </div>
 
           <h1 className="text-4xl sm:text-6xl font-black text-slate-900 tracking-tight max-w-4xl mx-auto leading-[1.12]">
-            All your business channels.{' '}
+            All your business channels.
+            <br />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-[#FF2D85]">
               One smart assistant.
             </span>
@@ -103,7 +109,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
 
         {/* spider web hub visual */}
         <div className="max-w-xl mx-auto px-6 pb-10 relative z-10">
-          <PinkkuWebDiagram variant="hero" className="w-full h-auto" />
+          <img src={pinkkuLogoFull} alt="Pinkku — Connect. Manage. Simplify." className="w-full h-auto" />
         </div>
       </section>
 
@@ -176,12 +182,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
           {[
-            { n: '01', title: 'Connect', icon: Link2, color: 'text-blue-600 bg-blue-50', text: "Link your social media and Gmail to Pinkku's central workspace in a few clicks." },
-            { n: '02', title: 'Create', icon: Wand2, color: 'text-[#FF2D85] bg-pink-50', text: 'Generate Myanmar & English captions, hashtags, and content ideas with AI.' },
-            { n: '03', title: 'Automate', icon: Bot, color: 'text-emerald-600 bg-emerald-50', text: 'Draft customer replies and handle repetitive tasks — you approve every send.' },
-            { n: '04', title: 'Understand', icon: ShieldCheck, color: 'text-amber-600 bg-amber-50', text: 'AI flags urgent messages and surfaces the insights that actually matter.' },
+            { n: '01', title: 'Connect', icon: Link2, color: 'text-blue-600 bg-blue-100', cardBg: 'bg-blue-50/60 border-blue-100 hover:border-blue-200', text: "Link your social media and Gmail to Pinkku's central workspace in a few clicks." },
+            { n: '02', title: 'Create', icon: Wand2, color: 'text-[#FF2D85] bg-pink-100', cardBg: 'bg-pink-50/60 border-pink-100 hover:border-pink-200', text: 'Generate Myanmar & English captions, hashtags, and content ideas with AI.' },
+            { n: '03', title: 'Automate', icon: Bot, color: 'text-emerald-600 bg-emerald-100', cardBg: 'bg-emerald-50/60 border-emerald-100 hover:border-emerald-200', text: 'Draft customer replies and handle repetitive tasks — you approve every send.' },
+            { n: '04', title: 'Understand', icon: ShieldCheck, color: 'text-amber-600 bg-amber-100', cardBg: 'bg-amber-50/60 border-amber-100 hover:border-amber-200', text: 'AI flags urgent messages and surfaces the insights that actually matter.' },
           ].map((s) => (
-            <div key={s.n} className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm hover:shadow-md transition-shadow">
+            <div key={s.n} className={`rounded-3xl p-6 border shadow-sm hover:shadow-md transition-all ${s.cardBg}`}>
               <span className="text-[11px] font-black text-[#FF2D85] tracking-widest">{s.n}</span>
               <div className={`w-11 h-11 rounded-xl ${s.color} flex items-center justify-center my-3`}>
                 <s.icon className="w-5 h-5" />
@@ -214,36 +220,36 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
               <div className="flex items-center justify-between mb-5 flex-wrap gap-2">
                 <div>
                   <h3 className="text-sm font-black text-slate-900">Connected Channels</h3>
-                  <p className="text-xs text-slate-400 font-medium">0 / 5 connected — link a channel to unlock analytics</p>
+                  <p className="text-xs text-slate-400 font-medium">Gmail, TikTok &amp; Telegram ready today — more channels added regularly</p>
                 </div>
                 <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded-full bg-pink-100 text-[#FF2D85]">Demo Preview</span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {PLATFORMS.map((p, i) => {
-                  const isDemo = i === 2;
-                  return (
-                    <div key={p} className="rounded-2xl p-4 border border-slate-200 bg-white flex flex-col justify-between gap-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2.5">
-                          <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">
-                            <PlatformLogo platform={p} className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <p className="text-xs font-black text-slate-900 capitalize">{p}</p>
-                            <p className="text-[10px] text-slate-400 font-bold">0 followers</p>
-                          </div>
+                {PLATFORMS.map((p) => (
+                  <div key={p.id} className="rounded-2xl p-4 border border-slate-200 bg-white flex flex-col justify-between gap-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">
+                          <PlatformLogo platform={p.id} className="w-5 h-5" />
                         </div>
-                        <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${isDemo ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
-                          {isDemo ? 'DEMO' : 'OFFLINE'}
-                        </span>
+                        <div>
+                          <p className="text-xs font-black text-slate-900 capitalize">{p.id}</p>
+                          <p className="text-[10px] text-slate-400 font-bold">{p.live ? '0 followers' : 'On the roadmap'}</p>
+                        </div>
                       </div>
-                      <button className={`w-full py-2 rounded-xl text-xs font-bold transition-all ${isDemo ? 'bg-slate-100 text-slate-600' : 'bg-gradient-to-r from-pink-500 to-[#FF2D85] text-white'}`}>
-                        {isDemo ? 'View demo data' : '+ Connect'}
-                      </button>
+                      <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${p.live ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                        {p.live ? 'LIVE' : 'COMING SOON'}
+                      </span>
                     </div>
-                  );
-                })}
+                    <button
+                      disabled={!p.live}
+                      className={`w-full py-2 rounded-xl text-xs font-bold transition-all ${p.live ? 'bg-gradient-to-r from-pink-500 to-[#FF2D85] text-white' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+                    >
+                      {p.live ? '+ Connect' : 'Coming Soon'}
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -306,7 +312,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
           <div>
             <div className="flex items-center gap-2 justify-center sm:justify-start">
-              <span className="text-lg">🕷️</span>
+              <img src={pinkkuIcon} alt="" className="w-6 h-6 rounded-full object-cover" />
               <span className="font-black text-slate-900">Pinkku</span>
             </div>
             <p className="text-xs text-slate-400 font-medium mt-1">ပင့်ကူ — connecting every thread of your business.</p>

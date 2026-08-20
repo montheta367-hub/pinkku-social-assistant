@@ -215,7 +215,7 @@ export const initialMessages: CustomerMessage[] = [
 export const initialAIAgents: AIAgent[] = [
   {
     id: 'agent_social_strategist',
-    name: 'Moe Moe (Content Planner)',
+    name: 'Content Planner',
     role: 'Social Media & Caption AI',
     description: 'Generates viral captions, hashtags, and schedule suggestions tailored for Myanmar Facebook, TikTok, and Instagram audiences.',
     avatar: '👩‍💼',
@@ -226,7 +226,7 @@ export const initialAIAgents: AIAgent[] = [
   },
   {
     id: 'agent_customer_rep',
-    name: 'Thiri (Sales & CS Bot)',
+    name: 'Sales & CS Bot',
     role: '24/7 Customer Care & Order Taker',
     description: 'Reads customer DMs across Facebook, Telegram & TikTok, understands Burmese slang & Zawgyi/Unicode, and drafts instant professional replies.',
     avatar: '🌸',
@@ -237,7 +237,7 @@ export const initialAIAgents: AIAgent[] = [
   },
   {
     id: 'agent_email_manager',
-    name: 'Ko Min (Gmail AI Executive)',
+    name: 'Gmail AI Executive',
     role: 'Business & Supplier Inbox Assistant',
     description: 'Categorizes incoming supplier emails, invoices, partnership inquiries, and drafts formal bilingual responses.',
     avatar: '👨‍💻',

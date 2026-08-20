@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { UserProfile } from '../types';
 import { TabType } from '../components/Sidebar';
-import { Mail, Sparkles, Send, RefreshCw, Check, AlertCircle, PlugZap, CalendarPlus, CalendarCheck } from 'lucide-react';
+import { Mail, Sparkles, Send, RefreshCw, Check, AlertCircle, PlugZap, CalendarPlus, CalendarCheck, Trash2, X, ShieldAlert, Inbox } from 'lucide-react';
 
 interface GmailAIViewProps {
   user: UserProfile;
   onSelectTab: (tab: TabType) => void;
+  onDisconnected: () => void;
 }
 
 type Importance = 'urgent' | 'important' | 'normal' | 'low';
@@ -43,11 +44,13 @@ const IMPORTANCE_STYLE: Record<Importance, { dot: string; label: string; badge: 
 const IMPORTANCE_ORDER: Importance[] = ['urgent', 'important', 'normal', 'low'];
 type FilterLevel = 'all' | Importance;
 
-export const GmailAIView: React.FC<GmailAIViewProps> = ({ user, onSelectTab }) => {
+export const GmailAIView: React.FC<GmailAIViewProps> = ({ user, onSelectTab, onDisconnected }) => {
   const [status, setStatus] = useState<'loading' | 'not_connected' | 'ready' | 'error'>('loading');
   const [errorMsg, setErrorMsg] = useState('');
   const [emails, setEmails] = useState<GmailMessage[]>([]);
   const [selectedEmail, setSelectedEmail] = useState<GmailMessage | null>(null);
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
 
   const [aiDraft, setAiDraft] = useState('');
   const [isDrafting, setIsDrafting] = useState(false);
@@ -60,6 +63,11 @@ export const GmailAIView: React.FC<GmailAIViewProps> = ({ user, onSelectTab }) =
   const [filterLevel, setFilterLevel] = useState<FilterLevel>('all');
   const [addedEventIds, setAddedEventIds] = useState<Set<string>>(new Set());
   const [addingEventId, setAddingEventId] = useState<string | null>(null);
+
+  const [spamStatus, setSpamStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [spamMessages, setSpamMessages] = useState<GmailMessage[]>([]);
+  const [movedFromSpamIds, setMovedFromSpamIds] = useState<Set<string>>(new Set());
+  const [unspammingId, setUnspammingId] = useState<string | null>(null);
 
   const AUTO_LOAD_CAP = 200;
 
@@ -101,7 +109,10 @@ export const GmailAIView: React.FC<GmailAIViewProps> = ({ user, onSelectTab }) =
         const page = await fetchPage(token);
         if (!page) break;
         setEmails(prev => [...prev, ...page.messages]);
-        analyzeMessages(page.messages);
+        // Awaited (not fire-and-forget) so pages are analyzed one at a time —
+        // firing them all at once was bursting past Gemini's rate limit and
+        // making every email fall back to "normal" importance.
+        await analyzeMessages(page.messages);
         total += page.messages.length;
         token = page.nextPageToken;
       }
@@ -157,6 +168,49 @@ export const GmailAIView: React.FC<GmailAIViewProps> = ({ user, onSelectTab }) =
     }
   };
 
+  const loadSpam = async () => {
+    setSpamStatus('loading');
+    try {
+      const res = await fetch('/api/gmail/spam', { headers: authHeader() });
+      if (!res.ok) {
+        setSpamStatus('error');
+        return;
+      }
+      const data = await res.json();
+      const messages: GmailMessage[] = data.messages || [];
+      setSpamMessages(messages);
+      setSpamStatus('ready');
+
+      if (messages.length > 0) {
+        const analyzeRes = await fetch('/api/gmail/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeader() },
+          body: JSON.stringify({ messages: messages.map(m => ({ id: m.id, subject: m.subject, snippet: m.snippet })) }),
+        });
+        const analyzeData = await analyzeRes.json();
+        const byId = new Map((analyzeData.results || []).map((r: any) => [r.id, r]));
+        setSpamMessages(prev => prev.map(m => {
+          const r: any = byId.get(m.id);
+          return r ? { ...m, importance: r.importance } : m;
+        }));
+      }
+    } catch {
+      setSpamStatus('error');
+    }
+  };
+
+  const moveToInbox = async (id: string) => {
+    setUnspammingId(id);
+    try {
+      const res = await fetch(`/api/gmail/messages/${id}/unspam`, { method: 'POST', headers: authHeader() });
+      if (res.ok) setMovedFromSpamIds(prev => new Set(prev).add(id));
+    } catch {
+      // stays clickable to retry
+    } finally {
+      setUnspammingId(null);
+    }
+  };
+
   const addEventToCalendar = async (email: GmailMessage) => {
     if (!email.eventDate) return;
     setAddingEventId(email.id);
@@ -185,6 +239,19 @@ export const GmailAIView: React.FC<GmailAIViewProps> = ({ user, onSelectTab }) =
     }
   };
 
+  const handleDisconnect = async () => {
+    setIsDisconnecting(true);
+    try {
+      await fetch('/api/connections/gmail/disconnect', { method: 'POST', headers: authHeader() });
+    } catch {
+      // Proceed regardless — local state still resets, matching the rest of the app's pattern.
+    }
+    setIsDisconnecting(false);
+    setShowDisconnectConfirm(false);
+    onDisconnected();
+    onSelectTab('connections');
+  };
+
   useEffect(() => {
     loadMessages();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -206,6 +273,7 @@ export const GmailAIView: React.FC<GmailAIViewProps> = ({ user, onSelectTab }) =
         customerName: name,
         platform: 'Gmail',
         businessName: user.businessName,
+        senderName: user.name,
       }),
     })
       .then(res => res.json())
@@ -278,12 +346,51 @@ export const GmailAIView: React.FC<GmailAIViewProps> = ({ user, onSelectTab }) =
       <div className="max-w-xl mx-auto py-20 text-center space-y-4">
         <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
         <p className="text-sm font-bold text-slate-800">{errorMsg}</p>
-        <button
-          onClick={loadMessages}
-          className="px-5 py-2.5 rounded-xl bg-slate-900 text-white font-extrabold text-xs"
-        >
-          Try Again
-        </button>
+        <p className="text-xs text-slate-500 font-medium">
+          This usually means your Gmail connection expired. Disconnect and reconnect it to get a fresh token.
+        </p>
+        <div className="flex items-center justify-center gap-2">
+          <button
+            onClick={loadMessages}
+            className="px-5 py-2.5 rounded-xl bg-slate-900 text-white font-extrabold text-xs"
+          >
+            Try Again
+          </button>
+          <button
+            onClick={() => setShowDisconnectConfirm(true)}
+            className="px-5 py-2.5 rounded-xl border border-slate-200 hover:border-rose-300 hover:bg-rose-50 text-slate-600 hover:text-rose-600 font-extrabold text-xs flex items-center gap-2"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>Disconnect & Reconnect Gmail</span>
+          </button>
+        </div>
+
+        {showDisconnectConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4">
+            <div className="relative w-full max-w-sm bg-white rounded-3xl p-6 border border-slate-100 shadow-2xl space-y-4 text-left">
+              <button onClick={() => setShowDisconnectConfirm(false)} className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100 text-slate-400">
+                <X className="w-4 h-4" />
+              </button>
+              <h3 className="text-base font-black text-slate-900">Disconnect Gmail from Pinkku?</h3>
+              <p className="text-xs text-slate-500 font-medium">You'll be taken to the Connections tab to reconnect and grant fresh access.</p>
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={() => setShowDisconnectConfirm(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDisconnect}
+                  disabled={isDisconnecting}
+                  className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs disabled:opacity-50"
+                >
+                  {isDisconnecting ? 'Disconnecting…' : 'Disconnect'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -317,7 +424,118 @@ export const GmailAIView: React.FC<GmailAIViewProps> = ({ user, onSelectTab }) =
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
             <span>Gmail Connected</span>
           </span>
+          <button
+            onClick={() => setShowDisconnectConfirm(true)}
+            className="p-2 rounded-xl border border-slate-200 hover:border-rose-300 hover:bg-rose-50 text-slate-500 hover:text-rose-600"
+            title="Disconnect Gmail"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
         </div>
+      </div>
+
+      {showDisconnectConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4">
+          <div className="relative w-full max-w-sm bg-white rounded-3xl p-6 border border-slate-100 shadow-2xl space-y-4">
+            <button onClick={() => setShowDisconnectConfirm(false)} className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100 text-slate-400">
+              <X className="w-4 h-4" />
+            </button>
+            <h3 className="text-base font-black text-slate-900">Disconnect Gmail from Pinkku?</h3>
+            <p className="text-xs text-slate-500 font-medium">Pinkku will no longer be able to read or reply to your Gmail inbox for this account.</p>
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => setShowDisconnectConfirm(false)}
+                className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDisconnect}
+                disabled={isDisconnecting}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs disabled:opacity-50"
+              >
+                {isDisconnecting ? 'Disconnecting…' : 'Disconnect'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Spam Folder Check */}
+      <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200/80 shadow-sm space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5">
+            <div className="p-2 rounded-xl bg-amber-50 text-amber-600 shrink-0">
+              <ShieldAlert className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-xs font-black text-slate-900">Spam Folder Check</h3>
+              <p className="text-[11px] text-slate-500 font-medium">
+                Gmail's spam filter can wrongly catch real business emails — scan it so you don't miss an opportunity.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={loadSpam}
+            disabled={spamStatus === 'loading'}
+            className="px-4 py-2 rounded-xl border border-amber-200 hover:bg-amber-50 text-amber-700 font-bold text-xs flex items-center justify-center gap-2 shrink-0 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${spamStatus === 'loading' ? 'animate-spin' : ''}`} />
+            <span>{spamStatus === 'loading' ? 'Scanning…' : 'Scan Spam Folder'}</span>
+          </button>
+        </div>
+
+        {spamStatus === 'error' && (
+          <p className="text-[11px] font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+            Couldn't check the Spam folder — try again in a moment.
+          </p>
+        )}
+
+        {spamStatus === 'ready' && (
+          spamMessages.length === 0 ? (
+            <p className="text-[11px] text-slate-400 font-medium">Spam folder is empty — nothing to check.</p>
+          ) : (
+            <div className="space-y-2">
+              {spamMessages.map(m => {
+                const { name } = parseFrom(m.from);
+                const moved = movedFromSpamIds.has(m.id);
+                const flagged = m.importance === 'urgent' || m.importance === 'important';
+                return (
+                  <div
+                    key={m.id}
+                    className={`p-3 rounded-xl border flex items-center justify-between gap-3 ${flagged ? 'bg-amber-50/60 border-amber-200' : 'bg-slate-50/60 border-slate-200/70'}`}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black text-slate-900 truncate">{name}</span>
+                        {flagged && (
+                          <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full ${IMPORTANCE_STYLE[m.importance!].badge}`}>
+                            {IMPORTANCE_STYLE[m.importance!].label}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 font-medium truncate">{m.subject}</p>
+                    </div>
+                    {moved ? (
+                      <span className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-600 shrink-0">
+                        <Inbox className="w-3.5 h-3.5" /> Moved to Inbox
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => moveToInbox(m.id)}
+                        disabled={unspammingId === m.id}
+                        className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold shrink-0 disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        <Inbox className="w-3.5 h-3.5" />
+                        {unspammingId === m.id ? 'Moving…' : 'Move to Inbox'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )
+        )}
       </div>
 
       {/* Importance filter tabs */}

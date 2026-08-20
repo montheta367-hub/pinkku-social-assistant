@@ -209,9 +209,48 @@ export const TikTokManagementView: React.FC<TikTokManagementViewProps> = ({ user
       <div className="max-w-xl mx-auto py-20 text-center space-y-4">
         <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
         <p className="text-sm font-bold text-slate-800">{errorMsg || 'Something went wrong reaching TikTok.'}</p>
-        <button onClick={loadStatus} className="px-5 py-2.5 rounded-xl bg-slate-900 text-white font-extrabold text-xs">
-          Try Again
-        </button>
+        <p className="text-xs text-slate-500 font-medium">
+          This usually means the connection is stale (missing a permission the app now needs). Disconnect and reconnect to re-authorize it.
+        </p>
+        <div className="flex items-center justify-center gap-2">
+          <button onClick={loadStatus} className="px-5 py-2.5 rounded-xl bg-slate-900 text-white font-extrabold text-xs">
+            Try Again
+          </button>
+          <button
+            onClick={() => setShowDisconnectConfirm(true)}
+            className="px-5 py-2.5 rounded-xl border border-slate-200 hover:border-rose-300 hover:bg-rose-50 text-slate-600 hover:text-rose-600 font-extrabold text-xs flex items-center gap-2"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>Disconnect & Reconnect TikTok</span>
+          </button>
+        </div>
+
+        {showDisconnectConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4">
+            <div className="relative w-full max-w-sm bg-white rounded-3xl p-6 border border-slate-100 shadow-2xl space-y-4 text-left">
+              <button onClick={() => setShowDisconnectConfirm(false)} className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100 text-slate-400">
+                <X className="w-4 h-4" />
+              </button>
+              <h3 className="text-base font-black text-slate-900">Disconnect TikTok from Pinkku?</h3>
+              <p className="text-xs text-slate-500 font-medium">You'll be taken to the Connections tab to reconnect and grant fresh access.</p>
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={() => setShowDisconnectConfirm(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDisconnect}
+                  disabled={isDisconnecting}
+                  className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs disabled:opacity-50"
+                >
+                  {isDisconnecting ? 'Disconnecting…' : 'Disconnect'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

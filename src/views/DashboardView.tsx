@@ -57,7 +57,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
-            {user.businessName || "Your Online Business Hub"}
+            Your Business Dashboard
           </h1>
 
           <p className="text-xs sm:text-sm text-slate-500 font-medium leading-relaxed">
@@ -65,7 +65,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <>You haven't connected any channels yet. <strong className="text-slate-900">Connect your first channel</strong> to start receiving messages and publishing posts.</>
             ) : (
               <>
-                <strong className="text-slate-900">{connectedCount}/{connections.length} channels</strong> connected. You have <strong className="text-slate-900">{unreadMessages.length} unread customer inquiries</strong> and <strong className="text-slate-900">{scheduledPosts.length} posts scheduled</strong> for today.
+                <strong className="text-slate-900">{connectedCount} channel{connectedCount === 1 ? '' : 's'}</strong> connected. You have <strong className="text-slate-900">{unreadMessages.length} unread customer inquir{unreadMessages.length === 1 ? 'y' : 'ies'}</strong> and <strong className="text-slate-900">{scheduledPosts.length} post{scheduledPosts.length === 1 ? '' : 's'} scheduled</strong> for today.
               </>
             )}
           </p>

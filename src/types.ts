@@ -35,7 +35,7 @@ export interface SocialPost {
   platforms: PlatformType[];
   scheduledDate?: string;
   scheduledTime?: string;
-  status: 'draft' | 'scheduled' | 'published' | 'failed';
+  status: 'draft' | 'pending_review' | 'scheduled' | 'published' | 'failed';
   likes?: number;
   comments?: number;
   shares?: number;
