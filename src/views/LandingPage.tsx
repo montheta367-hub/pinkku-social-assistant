@@ -39,9 +39,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
       <header className="sticky top-0 z-40 backdrop-blur-md bg-pink-50/80 border-b border-pink-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-14 h-14 rounded-2xl overflow-hidden shadow-lg shadow-pink-500/25 shrink-0">
-              <img src={pinkkuIcon} alt="Pinkku" className="w-full h-full object-cover" />
-            </div>
+            <img src={pinkkuIcon} alt="Pinkku" className="h-14 w-auto object-contain shrink-0 animate-spider-swing" />
             <span className="text-xl font-black text-slate-900 tracking-tight">Pinkku</span>
           </div>
 
@@ -73,11 +71,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
       {/* ================= HERO ================= */}
       <section className="relative overflow-hidden bg-gradient-to-b from-pink-50/70 via-white to-white">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-14 pb-6 text-center space-y-7 relative z-10">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white border border-pink-200 text-[#FF2D85] text-xs font-black shadow-sm">
-            <Sparkles className="w-4 h-4" />
-            <span>AI BUSINESS ASSISTANT FOR MYANMAR SMBs</span>
-          </div>
-
           <h1 className="text-4xl sm:text-6xl font-black text-slate-900 tracking-tight max-w-4xl mx-auto leading-[1.12]">
             All your business channels.
             <br />

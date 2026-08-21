@@ -13,6 +13,16 @@ body {
   color: #0f172a;
 }
 
+/* Gentle pendulum swing for the header spider logo, hanging by its thread */
+@keyframes spider-swing {
+  0%, 100% { transform: rotate(-4deg); }
+  50% { transform: rotate(4deg); }
+}
+.animate-spider-swing {
+  transform-origin: top center;
+  animation: spider-swing 3s ease-in-out infinite;
+}
+
 /* Custom scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
