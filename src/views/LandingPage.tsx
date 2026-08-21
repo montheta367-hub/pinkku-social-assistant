@@ -12,7 +12,6 @@ import {
 } from 'lucide-react';
 import { PlatformLogo } from '../components/PlatformLogo';
 import pinkkuIcon from '../assets/pinkku-icon.png';
-import pinkkuLogoFull from '../assets/pinkku-logo-full.png';
 
 interface LandingPageProps {
   onGetStarted: () => void;
@@ -98,11 +97,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
               <span>See How It Works</span>
             </a>
           </div>
-        </div>
-
-        {/* spider web hub visual */}
-        <div className="max-w-xl mx-auto px-6 pb-10 relative z-10">
-          <img src={pinkkuLogoFull} alt="Pinkku — Connect. Manage. Simplify." className="w-full h-auto" />
         </div>
       </section>
 
