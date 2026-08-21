@@ -5,7 +5,6 @@ import {
   Wand2,
   Calendar as CalendarIcon,
   MessageCircle,
-  Mail as MailIcon,
   Link2,
   Bot,
   ShieldCheck,
@@ -252,12 +251,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
           <p className="text-xs sm:text-sm text-slate-500 font-medium">No bloated enterprise tools — just the essentials, done well.</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {[
-            { icon: Wand2, bg: 'bg-pink-100 text-[#FF2D85]', title: 'AI Content Creator', text: 'Generate Myanmar & English captions, hashtags, and posting-time suggestions instantly.' },
-            { icon: CalendarIcon, bg: 'bg-blue-100 text-blue-600', title: 'Content Calendar', text: 'Plan, schedule, and track posts across platforms with clear statuses.' },
-            { icon: MessageCircle, bg: 'bg-emerald-100 text-emerald-600', title: 'AI Customer Reply', text: 'Answer customer questions instantly using your product & FAQ knowledge base.' },
-            { icon: MailIcon, bg: 'bg-orange-100 text-orange-600', title: 'Gmail Priority Detection', text: 'AI flags urgent, customer, and business emails so nothing gets buried.' },
+            { icon: Link2, bg: 'bg-pink-100 text-[#FF2D85]', title: 'Smart Publishing', text: 'Connect Gmail, Facebook, TikTok, Instagram, X, YouTube & Telegram — publish manually or on a schedule with a built-in content calendar, then track reach, engagement & posts on a dashboard the AI learns from to recommend what to post next.' },
+            { icon: CalendarIcon, bg: 'bg-blue-100 text-blue-600', title: 'Smart Work', text: 'A flexible workflow calendar for planning tasks and deadlines — organized the way small teams actually work, Notion or Basecamp style.' },
+            { icon: MessageCircle, bg: 'bg-emerald-100 text-emerald-600', title: 'Smart Connect', text: 'One unified inbox for every customer message — reply manually, set rule-based auto-replies, or let the AI reply assistant draft it for you.' },
           ].map((f) => (
             <div key={f.title} className="bg-white rounded-3xl p-7 border border-slate-200/80 shadow-sm space-y-4 hover:shadow-md transition-shadow">
               <div className={`w-12 h-12 rounded-2xl ${f.bg} flex items-center justify-center`}>
