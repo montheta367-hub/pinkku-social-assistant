@@ -43,7 +43,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, onU
                 <Zap className="w-4 h-4 text-amber-500 fill-amber-500" />
               </h3>
               <div className="flex items-baseline gap-1">
-                <span className="text-2xl font-black text-slate-900">25,000</span>
+                <span className="text-2xl font-black text-slate-900">15,000</span>
                 <span className="text-xs font-bold text-slate-500">MMK / month</span>
               </div>
               <ul className="space-y-2 pt-2 text-xs text-slate-700 font-medium">
