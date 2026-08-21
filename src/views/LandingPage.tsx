@@ -11,7 +11,6 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { PlatformLogo } from '../components/PlatformLogo';
-import { PinkkuWebDiagram } from '../components/PinkkuWebDiagram';
 import pinkkuIcon from '../assets/pinkku-icon.png';
 import pinkkuLogoFull from '../assets/pinkku-logo-full.png';
 
@@ -161,9 +160,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
             Pinkku brings your social media and important business communication into one intelligent
             workspace — organized around a single, central hub.
           </p>
-        </div>
-        <div className="max-w-sm mx-auto px-6">
-          <PinkkuWebDiagram variant="mini" className="w-full h-auto" />
         </div>
       </section>
 
