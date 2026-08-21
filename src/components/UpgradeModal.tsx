@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Check, Sparkles, Zap, ShieldCheck } from 'lucide-react';
+import { X, Check, Sparkles, Zap } from 'lucide-react';
 
 interface UpgradeModalProps {
   isOpen: boolean;
@@ -31,7 +31,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, onU
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+        <div className="grid grid-cols-1 max-w-sm mx-auto w-full gap-4 pt-2">
           {/* Pro Monthly */}
           <div className="rounded-2xl border-2 border-pink-500 bg-pink-50/30 p-5 space-y-4 relative flex flex-col justify-between">
             <div className="absolute -top-3 right-4 bg-[#FF2D85] text-white text-[10px] font-black px-3 py-0.5 rounded-full uppercase tracking-wider shadow-sm">
@@ -66,43 +66,6 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ isOpen, onClose, onU
               className="w-full py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-[#FF2D85] text-white font-extrabold text-xs shadow-md shadow-pink-500/20 hover:opacity-95 transition-all"
             >
               Upgrade with KPay / WavePay
-            </button>
-          </div>
-
-          {/* Business Yearly */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4 flex flex-col justify-between">
-            <div className="space-y-2">
-              <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
-                <span>Pinkku Enterprise</span>
-                <ShieldCheck className="w-4 h-4 text-blue-600" />
-              </h3>
-              <div className="flex items-baseline gap-1">
-                <span className="text-2xl font-black text-slate-900">Custom Pricing</span>
-              </div>
-              <ul className="space-y-2 pt-2 text-xs text-slate-700 font-medium">
-                <li className="flex items-center gap-2">
-                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span>Everything in Pro Plan</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span>Multi-staff account management (up to 10 staff)</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span>Dedicated Myanmar Account Manager</span>
-                </li>
-                <li className="flex items-center gap-2">
-                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span>Custom AI fine-tuning for your brand tone</span>
-                </li>
-              </ul>
-            </div>
-            <button
-              onClick={() => { onUpgrade("enterprise"); onClose(); }}
-              className="w-full py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-800 font-extrabold text-xs transition-all"
-            >
-              Contact Sales Team
             </button>
           </div>
         </div>
