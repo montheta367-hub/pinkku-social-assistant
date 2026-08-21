@@ -63,9 +63,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <span>{user.name}</span>
                     <ShieldCheck className="w-3 h-3 text-pink-600" />
                   </div>
-                  <div className="text-[10px] text-slate-400 font-medium truncate max-w-[140px]">
-                    {user.businessName || user.email}
-                  </div>
                 </div>
               </div>
 
