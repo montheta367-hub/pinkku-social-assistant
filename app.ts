@@ -4,7 +4,7 @@ import rateLimit from 'express-rate-limit';
 import { GoogleGenAI } from '@google/genai';
 import { OAuth2Client } from 'google-auth-library';
 import { Resend } from 'resend';
-import { createClient } from '@supabase/supabase-js';
+import { selectOne, selectMany, insertRow, updateRows, upsertRow, deleteRows } from './db.js';
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -22,19 +22,29 @@ process.on('unhandledRejection', (reason) => {
   console.error('[unhandledRejection]', reason);
 });
 
-app.use(cors());
+// Locked down to known frontend origins instead of allowing any website to
+// call this API. Set ALLOWED_ORIGINS in .env (comma-separated) once you know
+// your real production domain — defaults cover local dev only.
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:3000')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin(origin, callback) {
+    // No Origin header means a same-origin browser request, curl, or a
+    // server-to-server call (e.g. Telegram/Facebook webhooks) — always allow.
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error('Not allowed by CORS'));
+  },
+}));
 app.use(express.json());
 
 // ---------------------------------------------------------------------------
-// Database (Supabase/Postgres — schema lives in supabase_schema.sql, run once
-// via the Supabase SQL Editor; this client just talks to it over HTTPS)
+// Database (Neon Postgres — schema lives in schema/*.sql, one file per
+// table, applied via the Neon SQL Editor or scripts/migrate-to-neon.ts;
+// db.ts talks to it directly over `pg`)
 // ---------------------------------------------------------------------------
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SECRET_KEY;
-if (!supabaseUrl || !supabaseKey) {
-  throw new Error('SUPABASE_URL and SUPABASE_SECRET_KEY must be set in .env');
-}
-const db = createClient(supabaseUrl, supabaseKey);
 
 // Verifies the ID token Google's Identity Services library hands back in the
 // browser, so "Sign in with Google" can never be spoofed by just POSTing an
@@ -80,9 +90,7 @@ interface UserRow {
 }
 
 async function findUserByEmail(email: string): Promise<UserRow | undefined> {
-  const { data, error } = await db.from('users').select('*').eq('email', email).maybeSingle();
-  if (error) throw error;
-  return (data as UserRow) || undefined;
+  return selectOne<UserRow>('users', { email });
 }
 
 async function insertUser(row: {
@@ -96,7 +104,7 @@ async function insertUser(row: {
   tier: string;
 }): Promise<UserRow> {
   const createdAt = new Date().toISOString();
-  const { data, error } = await db.from('users').insert({
+  return (await insertRow<UserRow>('users', {
     id: row.id,
     name: row.name,
     email: row.email,
@@ -106,9 +114,7 @@ async function insertUser(row: {
     avatar: row.avatar,
     tier: row.tier,
     created_at: createdAt,
-  }).select().single();
-  if (error) throw error;
-  return data as UserRow;
+  }, true))!;
 }
 
 function toPublicUser(row: UserRow) {
@@ -132,25 +138,23 @@ const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 async function createSession(userId: string): Promise<string> {
   const token = 'sess_' + randomUUID();
   const now = new Date();
-  const { error } = await db.from('sessions').insert({
+  await insertRow('sessions', {
     token,
     user_id: userId,
     created_at: now.toISOString(),
     expires_at: new Date(now.getTime() + SESSION_LIFETIME_MS).toISOString(),
   });
-  if (error) throw error;
   return token;
 }
 
 async function getUserBySessionToken(token: string): Promise<UserRow | undefined> {
-  const { data: session } = await db.from('sessions').select('user_id, expires_at').eq('token', token).maybeSingle();
+  const session = await selectOne<{ user_id: string; expires_at: string | null }>('sessions', { token }, 'user_id, expires_at');
   if (!session) return undefined;
   if (session.expires_at && new Date(session.expires_at).getTime() < Date.now()) {
-    await db.from('sessions').delete().eq('token', token);
+    await deleteRows('sessions', { token });
     return undefined;
   }
-  const { data: user } = await db.from('users').select('*').eq('id', session.user_id).maybeSingle();
-  return (user as UserRow) || undefined;
+  return selectOne<UserRow>('users', { id: session.user_id });
 }
 
 interface AuthedRequest extends express.Request {
@@ -177,36 +181,32 @@ async function requireAuth(req: AuthedRequest, res: express.Response, next: expr
 // ---------------------------------------------------------------------------
 async function createOAuthState(userId: string, platform: string, extra?: string): Promise<string> {
   const state = randomUUID();
-  const { error } = await db.from('oauth_states').insert({
+  await insertRow('oauth_states', {
     state, user_id: userId, platform, extra: extra ?? null, created_at: new Date().toISOString(),
   });
-  if (error) throw error;
   return state;
 }
 
 // Looks up a state (optionally scoped to a platform) and deletes it — states are one-time use.
 async function consumeOAuthState(state: string, platform?: string): Promise<{ user_id: string; extra: string | null } | undefined> {
-  let query = db.from('oauth_states').select('*').eq('state', state);
-  if (platform) query = query.eq('platform', platform);
-  const { data } = await query.maybeSingle();
+  const where: Record<string, any> = { state };
+  if (platform) where.platform = platform;
+  const data = await selectOne<{ user_id: string; extra: string | null }>('oauth_states', where);
   if (!data) return undefined;
-  await db.from('oauth_states').delete().eq('state', state);
-  return data as { user_id: string; extra: string | null };
+  await deleteRows('oauth_states', { state });
+  return data;
 }
 
 async function upsertConnectedAccount(row: Record<string, any>): Promise<void> {
-  const { error } = await db.from('connected_accounts').upsert(row, { onConflict: 'user_id,platform' });
-  if (error) throw error;
+  await upsertRow('connected_accounts', row, ['user_id', 'platform']);
 }
 
 async function getConnectedAccount(userId: string, platform: string): Promise<ConnectedAccountRow | undefined> {
-  const { data } = await db.from('connected_accounts').select('*').eq('user_id', userId).eq('platform', platform).maybeSingle();
-  return (data as ConnectedAccountRow) || undefined;
+  return selectOne<ConnectedAccountRow>('connected_accounts', { user_id: userId, platform });
 }
 
 async function updateConnectedAccount(userId: string, platform: string, patch: Record<string, any>): Promise<void> {
-  const { error } = await db.from('connected_accounts').update(patch).eq('user_id', userId).eq('platform', platform);
-  if (error) throw error;
+  await updateRows('connected_accounts', { user_id: userId, platform }, patch);
 }
 
 // ---------------------------------------------------------------------------
@@ -420,7 +420,7 @@ app.post('/api/auth/google', loginRateLimiter, async (req, res) => {
 
 app.post('/api/auth/logout', requireAuth, async (req: AuthedRequest, res) => {
   const token = (req.headers.authorization || '').slice(7);
-  await db.from('sessions').delete().eq('token', token);
+  await deleteRows('sessions', { token });
   return res.json({ success: true });
 });
 
@@ -515,8 +515,11 @@ app.get('/api/oauth/google/callback', async (req, res) => {
     // app+user — keep the previously stored one on reconnects that don't get a new one.
     let refreshToken = tokenData.refresh_token || null;
     if (!refreshToken) {
-      const { data: existing } = await db.from('connected_accounts')
-        .select('refresh_token').eq('user_id', stateRow.user_id).eq('platform', 'gmail').maybeSingle();
+      const existing = await selectOne<{ refresh_token: string | null }>(
+        'connected_accounts',
+        { user_id: stateRow.user_id, platform: 'gmail' },
+        'refresh_token'
+      );
       refreshToken = existing?.refresh_token || null;
     }
 
@@ -1016,10 +1019,9 @@ app.post('/api/connections/telegram/start', requireAuth, async (req: AuthedReque
   // one-time code rather than a full UUID, so it's typed manually instead of
   // going through createOAuthState (which always generates a UUID).
   const code = randomUUID().replace(/-/g, '').slice(0, 12);
-  const { error } = await db.from('oauth_states').insert({
+  await insertRow('oauth_states', {
     state: code, user_id: req.user!.id, platform: 'telegram', created_at: new Date().toISOString(),
   });
-  if (error) throw error;
 
   return res.json({ deepLink: `https://t.me/${username}?start=${code}`, code });
 });
@@ -1047,29 +1049,41 @@ app.get('/api/connections/telegram/customer-link', requireAuth, async (req: Auth
 // Toggle: when enabled, incoming Telegram customer messages get an AI-drafted
 // reply sent automatically instead of waiting for the owner to review and send.
 app.get('/api/settings/telegram-auto-reply', requireAuth, async (req: AuthedRequest, res) => {
-  const { data, error } = await db.from('users').select('telegram_auto_reply').eq('id', req.user!.id).maybeSingle();
-  if (error) return res.status(500).json({ error: 'Could not load this setting.' });
-  return res.json({ enabled: !!data?.telegram_auto_reply });
+  try {
+    const data = await selectOne<{ telegram_auto_reply: boolean }>('users', { id: req.user!.id }, 'telegram_auto_reply');
+    return res.json({ enabled: !!data?.telegram_auto_reply });
+  } catch {
+    return res.status(500).json({ error: 'Could not load this setting.' });
+  }
 });
 
 app.patch('/api/settings/telegram-auto-reply', requireAuth, async (req: AuthedRequest, res) => {
   const { enabled } = req.body;
-  const { error } = await db.from('users').update({ telegram_auto_reply: !!enabled }).eq('id', req.user!.id);
-  if (error) return res.status(500).json({ error: 'Could not save this setting.' });
+  try {
+    await updateRows('users', { id: req.user!.id }, { telegram_auto_reply: !!enabled });
+  } catch {
+    return res.status(500).json({ error: 'Could not save this setting.' });
+  }
   return res.json({ success: true, enabled: !!enabled });
 });
 
 // Same idea, for incoming Facebook Messenger DMs to a connected Page.
 app.get('/api/settings/facebook-auto-reply', requireAuth, async (req: AuthedRequest, res) => {
-  const { data, error } = await db.from('users').select('facebook_auto_reply').eq('id', req.user!.id).maybeSingle();
-  if (error) return res.status(500).json({ error: 'Could not load this setting.' });
-  return res.json({ enabled: !!data?.facebook_auto_reply });
+  try {
+    const data = await selectOne<{ facebook_auto_reply: boolean }>('users', { id: req.user!.id }, 'facebook_auto_reply');
+    return res.json({ enabled: !!data?.facebook_auto_reply });
+  } catch {
+    return res.status(500).json({ error: 'Could not load this setting.' });
+  }
 });
 
 app.patch('/api/settings/facebook-auto-reply', requireAuth, async (req: AuthedRequest, res) => {
   const { enabled } = req.body;
-  const { error } = await db.from('users').update({ facebook_auto_reply: !!enabled }).eq('id', req.user!.id);
-  if (error) return res.status(500).json({ error: 'Could not save this setting.' });
+  try {
+    await updateRows('users', { id: req.user!.id }, { facebook_auto_reply: !!enabled });
+  } catch {
+    return res.status(500).json({ error: 'Could not save this setting.' });
+  }
   return res.json({ success: true, enabled: !!enabled });
 });
 
@@ -1140,20 +1154,20 @@ async function handleTelegramUpdate(update: any): Promise<void> {
 
     if (code.startsWith('biz_')) {
       const ownerUserId = code.slice(4);
-      const { data: owner } = await db.from('users').select('id').eq('id', ownerUserId).maybeSingle();
+      const owner = await selectOne<{ id: string }>('users', { id: ownerUserId }, 'id');
       if (!owner) return;
 
       if (isGroupChat) {
         // A group (e.g. a class or project chat) — feeds AI Smart Schedule
         // only, never Customer DMs or auto-reply.
-        await db.from('telegram_groups').upsert({
+        await upsertRow('telegram_groups', {
           chat_id: chatId, owner_user_id: ownerUserId, group_name: msg.chat.title || null, created_at: new Date().toISOString(),
-        });
+        }, ['chat_id']);
         await sendTelegramMessage(botToken, msg.chat.id, "📌 This group is now linked to Pinkku! I'll scan messages here for tasks, deadlines and events and add them to your AI Smart Schedule.");
       } else {
-        await db.from('telegram_contacts').upsert({
+        await upsertRow('telegram_contacts', {
           chat_id: chatId, owner_user_id: ownerUserId, customer_name: customerName, created_at: new Date().toISOString(),
-        });
+        }, ['chat_id']);
         await sendTelegramMessage(botToken, msg.chat.id, "👋 You're connected! Send us a message here anytime and we'll get back to you.");
       }
     } else {
@@ -1175,12 +1189,12 @@ async function handleTelegramUpdate(update: any): Promise<void> {
   // Group chats only ever feed the schedule detector — never Customer
   // DMs, never auto-reply (that would be spammy toward classmates/teammates).
   if (isGroupChat) {
-    const { data: group } = await db.from('telegram_groups').select('owner_user_id').eq('chat_id', chatId).maybeSingle();
+    const group = await selectOne<{ owner_user_id: string }>('telegram_groups', { chat_id: chatId }, 'owner_user_id');
     if (!group) return;
 
     const detected = await detectEventInMessage(text, customerName);
     if (detected?.eventDetected && detected.eventDate) {
-      await db.from('schedule_events').insert({
+      await insertRow('schedule_events', {
         id: 'tg_' + randomUUID(),
         user_id: group.owner_user_id,
         title: detected.eventTitle || `From ${msg.chat.title || 'group'}`,
@@ -1196,10 +1210,14 @@ async function handleTelegramUpdate(update: any): Promise<void> {
   }
 
   // Private chat, not a /start command — route it if this chat is a known customer contact.
-  const { data: contact } = await db.from('telegram_contacts').select('owner_user_id, customer_name').eq('chat_id', chatId).maybeSingle();
+  const contact = await selectOne<{ owner_user_id: string; customer_name: string | null }>(
+    'telegram_contacts', { chat_id: chatId }, 'owner_user_id, customer_name'
+  );
   if (!contact) return;
 
-  const { data: owner } = await db.from('users').select('business_name, telegram_auto_reply').eq('id', contact.owner_user_id).maybeSingle();
+  const owner = await selectOne<{ business_name: string | null; telegram_auto_reply: boolean }>(
+    'users', { id: contact.owner_user_id }, 'business_name, telegram_auto_reply'
+  );
   const finalCustomerName = contact.customer_name || customerName;
   let status = 'unread';
   let replyText: string | null = null;
@@ -1222,7 +1240,7 @@ async function handleTelegramUpdate(update: any): Promise<void> {
     }
   }
 
-  await db.from('customer_messages').insert({
+  await insertRow('customer_messages', {
     id: 'msg_' + randomUUID(),
     user_id: contact.owner_user_id,
     platform: 'telegram',
@@ -1236,7 +1254,7 @@ async function handleTelegramUpdate(update: any): Promise<void> {
 
   const detected = await detectEventInMessage(text, finalCustomerName);
   if (detected?.eventDetected && detected.eventDate) {
-    await db.from('schedule_events').insert({
+    await insertRow('schedule_events', {
       id: 'tg_' + randomUUID(),
       user_id: contact.owner_user_id,
       title: detected.eventTitle || `Message from ${finalCustomerName}`,
@@ -1294,11 +1312,9 @@ async function handleFacebookEntry(entry: any): Promise<void> {
     // Skip delivery/read receipts, postbacks, and echoes of the Page's own sent messages.
     if (!senderId || !text || event.message?.is_echo) continue;
 
-    const { data: account } = await db.from('connected_accounts')
-      .select('user_id, access_token')
-      .eq('platform', 'facebook')
-      .eq('external_id', pageId)
-      .maybeSingle();
+    const account = await selectOne<{ user_id: string; access_token: string }>(
+      'connected_accounts', { platform: 'facebook', external_id: pageId }, 'user_id, access_token'
+    );
     if (!account) continue;
 
     let customerName = 'Facebook Customer';
@@ -1312,7 +1328,9 @@ async function handleFacebookEntry(entry: any): Promise<void> {
       // Profile lookup failed — the generic fallback name above is fine.
     }
 
-    const { data: owner } = await db.from('users').select('business_name, facebook_auto_reply').eq('id', account.user_id).maybeSingle();
+    const owner = await selectOne<{ business_name: string | null; facebook_auto_reply: boolean }>(
+      'users', { id: account.user_id }, 'business_name, facebook_auto_reply'
+    );
     let status = 'unread';
     let replyText: string | null = null;
 
@@ -1334,7 +1352,7 @@ async function handleFacebookEntry(entry: any): Promise<void> {
       }
     }
 
-    await db.from('customer_messages').insert({
+    await insertRow('customer_messages', {
       id: 'msg_' + randomUUID(),
       user_id: account.user_id,
       platform: 'facebook',
@@ -1348,7 +1366,7 @@ async function handleFacebookEntry(entry: any): Promise<void> {
 
     const detected = await detectEventInMessage(text, customerName);
     if (detected?.eventDetected && detected.eventDate) {
-      await db.from('schedule_events').insert({
+      await insertRow('schedule_events', {
         id: 'fb_' + randomUUID(),
         user_id: account.user_id,
         title: detected.eventTitle || `Message from ${customerName}`,
@@ -1400,10 +1418,11 @@ app.post('/api/facebook/webhook', async (req, res) => {
 // Connected channels (real, per-user — backed by connected_accounts)
 // ---------------------------------------------------------------------------
 app.get('/api/connections', requireAuth, async (req: AuthedRequest, res) => {
-  const { data: rows, error } = await db.from('connected_accounts')
-    .select('platform, account_email, account_name, avatar, connected_at')
-    .eq('user_id', req.user!.id);
-  if (error) throw error;
+  const rows = await selectMany(
+    'connected_accounts',
+    { user_id: req.user!.id },
+    { columns: 'platform, account_email, account_name, avatar, connected_at' }
+  );
 
   return res.json({
     connections: (rows || []).map(r => ({
@@ -1417,7 +1436,7 @@ app.get('/api/connections', requireAuth, async (req: AuthedRequest, res) => {
 });
 
 app.post('/api/connections/:platform/disconnect', requireAuth, async (req: AuthedRequest, res) => {
-  await db.from('connected_accounts').delete().eq('user_id', req.user!.id).eq('platform', req.params.platform);
+  await deleteRows('connected_accounts', { user_id: req.user!.id, platform: req.params.platform });
   return res.json({ success: true });
 });
 
@@ -1870,8 +1889,7 @@ Output strictly a JSON object: { "results": [ { "id": string, "eventDetected": b
 // ---------------------------------------------------------------------------
 app.get('/api/schedule/events', requireAuth, async (req: AuthedRequest, res) => {
   try {
-    const { data, error } = await db.from('schedule_events').select('*').eq('user_id', req.user!.id);
-    if (error) throw error;
+    const data = await selectMany('schedule_events', { user_id: req.user!.id });
     return res.json({
       events: (data || []).map(r => ({
         id: r.id,
@@ -1896,7 +1914,7 @@ app.post('/api/schedule/events', requireAuth, async (req: AuthedRequest, res) =>
 
   const eventId = id || `manual_${randomUUID()}`;
   try {
-    const { error } = await db.from('schedule_events').upsert({
+    await upsertRow('schedule_events', {
       id: eventId,
       user_id: req.user!.id,
       title,
@@ -1906,8 +1924,7 @@ app.post('/api/schedule/events', requireAuth, async (req: AuthedRequest, res) =>
       source_subject: sourceSubject || null,
       manual: !!manual,
       created_at: new Date().toISOString(),
-    }, { onConflict: 'user_id,id' });
-    if (error) throw error;
+    }, ['user_id', 'id']);
     return res.json({ success: true, id: eventId });
   } catch (err) {
     console.error('[schedule] save error:', err);
@@ -1917,7 +1934,7 @@ app.post('/api/schedule/events', requireAuth, async (req: AuthedRequest, res) =>
 
 app.delete('/api/schedule/events/:id', requireAuth, async (req: AuthedRequest, res) => {
   try {
-    await db.from('schedule_events').delete().eq('user_id', req.user!.id).eq('id', req.params.id);
+    await deleteRows('schedule_events', { user_id: req.user!.id, id: req.params.id });
     return res.json({ success: true });
   } catch (err) {
     console.error('[schedule] delete error:', err);
@@ -1947,8 +1964,7 @@ function toPostResponse(r: any) {
 
 app.get('/api/posts', requireAuth, async (req: AuthedRequest, res) => {
   try {
-    const { data, error } = await db.from('posts').select('*').eq('user_id', req.user!.id).order('created_at', { ascending: false });
-    if (error) throw error;
+    const data = await selectMany('posts', { user_id: req.user!.id }, { orderBy: 'created_at', ascending: false });
     return res.json({ posts: (data || []).map(toPostResponse) });
   } catch (err) {
     console.error('[posts] list error:', err);
@@ -1964,7 +1980,7 @@ app.post('/api/posts', requireAuth, async (req: AuthedRequest, res) => {
   const id = 'post_' + randomUUID();
   const now = new Date().toISOString();
   try {
-    const { error } = await db.from('posts').insert({
+    await insertRow('posts', {
       id,
       user_id: req.user!.id,
       title,
@@ -1977,7 +1993,6 @@ app.post('/api/posts', requireAuth, async (req: AuthedRequest, res) => {
       created_at: now,
       updated_at: now,
     });
-    if (error) throw error;
     return res.json({ success: true, id });
   } catch (err) {
     console.error('[posts] create error:', err);
@@ -1996,8 +2011,7 @@ app.patch('/api/posts/:id', requireAuth, async (req: AuthedRequest, res) => {
   if (scheduledTime !== undefined) patch.scheduled_time = scheduledTime;
 
   try {
-    const { error } = await db.from('posts').update(patch).eq('user_id', req.user!.id).eq('id', req.params.id);
-    if (error) throw error;
+    await updateRows('posts', { user_id: req.user!.id, id: req.params.id }, patch);
     return res.json({ success: true });
   } catch (err) {
     console.error('[posts] update error:', err);
@@ -2007,7 +2021,7 @@ app.patch('/api/posts/:id', requireAuth, async (req: AuthedRequest, res) => {
 
 app.delete('/api/posts/:id', requireAuth, async (req: AuthedRequest, res) => {
   try {
-    await db.from('posts').delete().eq('user_id', req.user!.id).eq('id', req.params.id);
+    await deleteRows('posts', { user_id: req.user!.id, id: req.params.id });
     return res.json({ success: true });
   } catch (err) {
     console.error('[posts] delete error:', err);
@@ -2022,8 +2036,7 @@ app.delete('/api/posts/:id', requireAuth, async (req: AuthedRequest, res) => {
 // ---------------------------------------------------------------------------
 app.get('/api/messages', requireAuth, async (req: AuthedRequest, res) => {
   try {
-    const { data, error } = await db.from('customer_messages').select('*').eq('user_id', req.user!.id).order('created_at', { ascending: false });
-    if (error) throw error;
+    const data = await selectMany('customer_messages', { user_id: req.user!.id }, { orderBy: 'created_at', ascending: false });
     return res.json({
       messages: (data || []).map(r => ({
         id: r.id,
@@ -2046,8 +2059,7 @@ app.post('/api/messages/:id/reply', requireAuth, async (req: AuthedRequest, res)
   if (!replyText || !String(replyText).trim()) return res.status(400).json({ error: 'replyText is required.' });
 
   try {
-    const { data: row, error: fetchError } = await db.from('customer_messages').select('*').eq('user_id', req.user!.id).eq('id', req.params.id).maybeSingle();
-    if (fetchError) throw fetchError;
+    const row = await selectOne('customer_messages', { user_id: req.user!.id, id: req.params.id });
     if (!row) return res.status(404).json({ error: 'Message not found.' });
 
     if (row.platform === 'telegram' && row.external_chat_id) {
@@ -2060,8 +2072,7 @@ app.post('/api/messages/:id/reply', requireAuth, async (req: AuthedRequest, res)
       if (account?.access_token) await sendFacebookMessage(account.access_token, row.external_chat_id, replyText);
     }
 
-    const { error: updateError } = await db.from('customer_messages').update({ status: 'replied' }).eq('user_id', req.user!.id).eq('id', req.params.id);
-    if (updateError) throw updateError;
+    await updateRows('customer_messages', { user_id: req.user!.id, id: req.params.id }, { status: 'replied' });
 
     return res.json({ success: true });
   } catch (err) {
