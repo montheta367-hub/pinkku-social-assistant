@@ -1,7 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Mail, Lock, User, Building, ArrowRight, Check, AlertCircle } from 'lucide-react';
 import { UserProfile } from '../types';
 import pinkkuIcon from '../assets/pinkku-icon.png';
+
+// Minimal shape of the Google Identity Services API we use — loaded via the
+// <script src="https://accounts.google.com/gsi/client"> tag in index.html.
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (config: { client_id: string; callback: (response: { credential?: string }) => void }) => void;
+          renderButton: (parent: HTMLElement, options: Record<string, unknown>) => void;
+        };
+      };
+    };
+  }
+}
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -29,22 +44,64 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
-  const [showGoogleChooser, setShowGoogleChooser] = useState(false);
-  const [customGoogleEmail, setCustomGoogleEmail] = useState("");
+  const googleButtonRef = useRef<HTMLDivElement>(null);
+  const [googleReady, setGoogleReady] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setMode(initialMode);
       setErrorMessage("");
       setSuccessMsg("");
-      setShowGoogleChooser(false);
-      setCustomGoogleEmail("");
       setName("");
       setEmail(initialMode === "login" && currentUser.isLoggedIn ? currentUser.email : "");
       setPassword("");
       setBusinessName("");
     }
   }, [isOpen, initialMode, currentUser]);
+
+  // The GSI script tag loads async, so poll briefly until window.google shows up.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    let attempts = 0;
+    const tryDetect = () => {
+      if (cancelled) return;
+      if (window.google?.accounts?.id) {
+        setGoogleReady(true);
+        return;
+      }
+      attempts += 1;
+      if (attempts < 50) setTimeout(tryDetect, 100);
+    };
+    tryDetect();
+    return () => { cancelled = true; };
+  }, [isOpen]);
+
+  // Real "Sign in with Google": renders Google's own button and hands us a
+  // signed ID token in the callback — never a plain email we'd have to trust.
+  // Always labeled "Sign in" (never "Sign up") because the backend only ever
+  // logs an existing account in with it — it never creates a new one.
+  useEffect(() => {
+    if (!googleReady || !googleButtonRef.current || !window.google) return;
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+    if (!clientId) {
+      console.error("VITE_GOOGLE_CLIENT_ID is not set — Google sign-in is disabled.");
+      return;
+    }
+    window.google.accounts.id.initialize({
+      client_id: clientId,
+      callback: handleGoogleCredentialResponse,
+    });
+    googleButtonRef.current.innerHTML = "";
+    window.google.accounts.id.renderButton(googleButtonRef.current, {
+      theme: "outline",
+      size: "large",
+      shape: "pill",
+      width: 360,
+      text: "signin_with",
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [googleReady]);
 
   if (!isOpen) return null;
 
@@ -115,24 +172,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  const performGoogleLogin = async (targetEmail: string) => {
+  // Called by Google's own button with a signed ID token — the backend
+  // verifies it against Google before trusting the email inside it.
+  async function handleGoogleCredentialResponse(response: { credential?: string }) {
+    if (!response.credential) {
+      setErrorMessage("Google sign-in did not return a credential.");
+      return;
+    }
     setIsLoading(true);
     setErrorMessage("");
-
-    const cleanEmail = targetEmail.trim().toLowerCase();
-    const cleanEmailPrefix = cleanEmail.split("@")[0] || "User";
-    const defaultGoogleName = cleanEmailPrefix.charAt(0).toUpperCase() + cleanEmailPrefix.slice(1).replace(".", " ");
 
     try {
       const res = await fetch("/api/auth/google", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          googleEmail: cleanEmail,
-          googleName: (name && mode === "register") ? name : defaultGoogleName,
-          googleAvatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(defaultGoogleName)}&background=4285F4&color=fff`,
-          businessName: (businessName && mode === "register") ? businessName : `${defaultGoogleName}'s Workspace`
-        })
+        body: JSON.stringify({ credential: response.credential }),
       });
 
       const data = await res.json();
@@ -143,11 +197,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         return;
       }
 
-      setSuccessMsg(
-        data.isNewUser && data.emailSent
-          ? `✓ Connected with Google (${cleanEmail}) — confirmation email sent!`
-          : `✓ Connected with Google Account (${cleanEmail})`
-      );
+      setSuccessMsg("✓ Connected with Google Account");
 
       if (data.token) {
         localStorage.setItem("pinkku_token", data.token);
@@ -156,15 +206,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const googleUser: UserProfile = {
         ...currentUser,
         ...(data.user || {}),
-        name: data.user?.name || defaultGoogleName,
-        email: data.user?.email || cleanEmail,
-        businessName: data.user?.businessName || `${defaultGoogleName}'s Workspace`,
         isLoggedIn: true,
       };
 
       setTimeout(() => {
         onLoginSuccess(googleUser, !!data.isNewUser);
-        setShowGoogleChooser(false);
         onClose();
         setSuccessMsg("");
       }, 900);
@@ -173,91 +219,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setIsLoading(false);
       setErrorMessage("Could not connect to Google authentication service.");
     }
-  };
-
-  const handleGoogleAuth = () => {
-    if (email.trim()) {
-      performGoogleLogin(email.trim());
-    } else {
-      setShowGoogleChooser(true);
-    }
-  };
-
-  // Render Google Account Chooser UI
-  if (showGoogleChooser) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/65 backdrop-blur-md p-4 animate-in fade-in">
-        <div className="relative w-full max-w-sm bg-white rounded-3xl p-6 sm:p-7 border border-slate-200 shadow-2xl space-y-5 text-slate-800">
-          <button
-            onClick={() => setShowGoogleChooser(false)}
-            className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-
-          <div className="text-center space-y-2 pt-1">
-            <svg className="w-8 h-8 mx-auto" viewBox="0 0 24 24">
-              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-            </svg>
-            <h3 className="text-lg font-black text-slate-900 tracking-tight">Sign in with Google</h3>
-            <p className="text-xs text-slate-500 font-medium">Choose an account to continue to <span className="font-extrabold text-[#FF2D85]">Pinkku</span></p>
-          </div>
-
-          {errorMessage && (
-            <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-rose-800 text-xs font-bold flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{errorMessage}</span>
-            </div>
-          )}
-
-          {successMsg && (
-            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 text-xs font-bold flex items-center gap-2">
-              <Check className="w-4 h-4 shrink-0" />
-              <span>{successMsg}</span>
-            </div>
-          )}
-
-          <div className="space-y-2.5 pt-1">
-            <div className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/70 space-y-2">
-              <label className="block text-[11px] font-extrabold text-slate-700">Continue with your Google email:</label>
-              <div className="flex gap-2">
-                <input
-                  type="email"
-                  value={customGoogleEmail}
-                  onChange={(e) => setCustomGoogleEmail(e.target.value)}
-                  placeholder="your-account@gmail.com"
-                  className="flex-1 px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <button
-                  onClick={() => {
-                    if (customGoogleEmail.trim()) {
-                      performGoogleLogin(customGoogleEmail.trim());
-                    }
-                  }}
-                  disabled={isLoading || !customGoogleEmail.trim()}
-                  className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all disabled:opacity-40"
-                >
-                  Sign in
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-2 flex justify-between items-center text-[11px] text-slate-400 border-t border-slate-100">
-            <button
-              onClick={() => setShowGoogleChooser(false)}
-              className="text-slate-500 font-bold hover:text-slate-800 transition-colors"
-            >
-              ← Back to login
-            </button>
-            <span className="font-medium text-slate-400">Google OAuth 2.0</span>
-          </div>
-        </div>
-      </div>
-    );
   }
 
   return (
@@ -284,20 +245,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </p>
         </div>
 
-        {/* Google One-Click Login Button */}
-        <button
-          onClick={handleGoogleAuth}
-          disabled={isLoading}
-          className="w-full py-3 px-4 rounded-2xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 flex items-center justify-center gap-3 text-xs font-bold text-slate-700 transition-all shadow-sm group"
-        >
-          <svg className="w-4 h-4" viewBox="0 0 24 24">
-            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-          </svg>
-          <span>Continue with Google</span>
-        </button>
+        {/* Real Google Identity Services button — Google renders this itself,
+            so there is no way for a client to fake the account it signs in as.
+            Existing accounts only; it never creates a new one. */}
+        <div className="space-y-1.5">
+          <div className="flex justify-center min-h-[44px]">
+            <div ref={googleButtonRef} />
+            {!googleReady && (
+              <div className="w-full py-3 px-4 rounded-2xl border border-slate-200 flex items-center justify-center text-xs font-bold text-slate-400">
+                Loading Google Sign-In…
+              </div>
+            )}
+          </div>
+          <p className="text-center text-[11px] text-slate-400 font-medium">
+            For accounts already registered with this Google email.
+          </p>
+        </div>
 
         <div className="relative flex items-center justify-center">
           <div className="border-t border-slate-100 w-full"></div>

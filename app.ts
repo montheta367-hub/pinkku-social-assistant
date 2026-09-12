@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import { GoogleGenAI } from '@google/genai';
+import { OAuth2Client } from 'google-auth-library';
 import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
@@ -33,6 +35,23 @@ if (!supabaseUrl || !supabaseKey) {
   throw new Error('SUPABASE_URL and SUPABASE_SECRET_KEY must be set in .env');
 }
 const db = createClient(supabaseUrl, supabaseKey);
+
+// Verifies the ID token Google's Identity Services library hands back in the
+// browser, so "Sign in with Google" can never be spoofed by just POSTing an
+// arbitrary email (see /api/auth/google below).
+const googleOAuthClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+// Slows down credential-stuffing / brute-force attempts against real
+// password login. Note: this is an in-memory counter, so on Vercel's
+// serverless runtime it only protects within a single warm instance, not
+// globally — good enough as a first line of defense, not a hard guarantee.
+const loginRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Please wait a few minutes and try again.' },
+});
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString('hex');
@@ -108,16 +127,28 @@ function toPublicUser(row: UserRow) {
 // ---------------------------------------------------------------------------
 // Sessions (Bearer tokens backing localStorage's "pinkku_token")
 // ---------------------------------------------------------------------------
+const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
 async function createSession(userId: string): Promise<string> {
   const token = 'sess_' + randomUUID();
-  const { error } = await db.from('sessions').insert({ token, user_id: userId, created_at: new Date().toISOString() });
+  const now = new Date();
+  const { error } = await db.from('sessions').insert({
+    token,
+    user_id: userId,
+    created_at: now.toISOString(),
+    expires_at: new Date(now.getTime() + SESSION_LIFETIME_MS).toISOString(),
+  });
   if (error) throw error;
   return token;
 }
 
 async function getUserBySessionToken(token: string): Promise<UserRow | undefined> {
-  const { data: session } = await db.from('sessions').select('user_id').eq('token', token).maybeSingle();
+  const { data: session } = await db.from('sessions').select('user_id, expires_at').eq('token', token).maybeSingle();
   if (!session) return undefined;
+  if (session.expires_at && new Date(session.expires_at).getTime() < Date.now()) {
+    await db.from('sessions').delete().eq('token', token);
+    return undefined;
+  }
   const { data: user } = await db.from('users').select('*').eq('id', session.user_id).maybeSingle();
   return (user as UserRow) || undefined;
 }
@@ -275,7 +306,7 @@ async function generateContentWithRetry(
 // ---------------------------------------------------------------------------
 // Authentication Endpoints
 // ---------------------------------------------------------------------------
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', loginRateLimiter, async (req, res) => {
   const { name, email, password, businessName, businessType } = req.body;
 
   if (!email || !String(email).trim()) {
@@ -313,7 +344,7 @@ app.post('/api/auth/register', async (req, res) => {
   });
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginRateLimiter, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !String(email).trim()) {
     return res.status(400).json({ error: 'Email is required.' });
@@ -339,46 +370,51 @@ app.post('/api/auth/login', async (req, res) => {
   });
 });
 
-// Google Authentication endpoint
-app.post('/api/auth/google', async (req, res) => {
-  const { googleEmail, googleName, googleAvatar, businessName } = req.body;
-  if (!googleEmail || !String(googleEmail).trim()) {
-    return res.status(400).json({ error: 'Google email is required.' });
+// Google Authentication endpoint — takes the ID token minted by Google's
+// Identity Services library in the browser (see AuthModal's GoogleLoginButton)
+// and verifies its signature + audience server-side, so the email it trusts
+// is one Google actually vouches for, never a value the client can just type.
+// Login only: it signs in an existing Pinkku account whose email matches the
+// verified Google account. It deliberately never auto-creates a new account —
+// new users must register with name/email/password first.
+app.post('/api/auth/google', loginRateLimiter, async (req, res) => {
+  const { credential } = req.body;
+  if (!credential || typeof credential !== 'string') {
+    return res.status(400).json({ error: 'Google credential is required.' });
+  }
+  if (!process.env.GOOGLE_CLIENT_ID) {
+    return res.status(503).json({ error: 'Google sign-in is not configured on this server.' });
   }
 
-  const normalizedEmail = String(googleEmail).toLowerCase().trim();
+  let payload;
+  try {
+    const ticket = await googleOAuthClient.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    payload = ticket.getPayload();
+  } catch (err) {
+    console.error('[auth/google] ID token verification failed:', err);
+    return res.status(401).json({ error: 'Invalid or expired Google credential.' });
+  }
+
+  if (!payload?.email || !payload.email_verified) {
+    return res.status(401).json({ error: 'Google account has no verified email.' });
+  }
+
+  const normalizedEmail = payload.email.toLowerCase().trim();
   const existing = await findUserByEmail(normalizedEmail);
 
-  if (existing) {
-    return res.json({
-      token: await createSession(existing.id),
-      user: toPublicUser(existing),
-      isNewUser: false,
+  if (!existing) {
+    return res.status(404).json({
+      error: 'No Pinkku account found for this Google email. Please register first with your name, email, and a password.',
     });
   }
 
-  const cleanPrefix = normalizedEmail.split('@')[0] || 'user';
-  const derivedName = (googleName && String(googleName).trim()) || (cleanPrefix.charAt(0).toUpperCase() + cleanPrefix.slice(1));
-  const avatar = googleAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(derivedName)}&background=4285F4&color=fff`;
-
-  const row = await insertUser({
-    id: 'usr_g_' + randomUUID(),
-    name: derivedName,
-    email: normalizedEmail,
-    passwordHash: null,
-    businessName: (businessName && String(businessName).trim()) || `${derivedName}'s Workspace`,
-    businessType: 'Social Media & Retail',
-    avatar,
-    tier: 'free',
-  });
-
-  const emailSent = await sendWelcomeEmail(row.email, row.name);
-
   return res.json({
-    token: await createSession(row.id),
-    user: toPublicUser(row),
-    isNewUser: true,
-    emailSent,
+    token: await createSession(existing.id),
+    user: toPublicUser(existing),
+    isNewUser: false,
   });
 });
 
