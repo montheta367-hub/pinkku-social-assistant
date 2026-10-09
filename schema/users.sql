@@ -16,3 +16,9 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_auto_reply BOOLEAN NOT NULL 
 
 -- Same idea, for incoming Facebook Messenger DMs to a connected Page.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS facebook_auto_reply BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Bring-your-own-key: when set (encrypted, see encryptSecret in app.ts),
+-- every Gemini call this user triggers — post generation, customer replies,
+-- TikTok tips, Gmail triage — uses their own key and quota instead of the
+-- shared GEMINI_API_KEY the app owner pays for.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS gemini_api_key TEXT;

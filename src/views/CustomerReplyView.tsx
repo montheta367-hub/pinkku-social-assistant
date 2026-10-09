@@ -13,7 +13,10 @@ import {
   AlertCircle,
   Copy,
   Link as LinkIcon,
-  Zap
+  Zap,
+  HelpCircle,
+  Plus,
+  Trash2
 } from 'lucide-react';
 
 interface CustomerReplyViewProps {
@@ -21,6 +24,15 @@ interface CustomerReplyViewProps {
   messages: CustomerMessage[];
   onUpdateMessage: (id: string, replyText: string) => void;
 }
+
+interface FaqEntry {
+  id: string;
+  question: string;
+  keywords: string;
+  answer: string;
+}
+
+const FAQ_MAX_ENTRIES = 6;
 
 export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
   user,
@@ -38,6 +50,24 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
   const [autoReplyLoading, setAutoReplyLoading] = useState(false);
   const [facebookAutoReply, setFacebookAutoReply] = useState(false);
   const [facebookAutoReplyLoading, setFacebookAutoReplyLoading] = useState(false);
+  const [faqs, setFaqs] = useState<FaqEntry[]>([]);
+  const [newFaq, setNewFaq] = useState({ question: '', keywords: '', answer: '' });
+  const [faqSaving, setFaqSaving] = useState(false);
+  const [faqError, setFaqError] = useState('');
+
+  const loadFaqs = async () => {
+    const token = localStorage.getItem('pinkku_token');
+    if (!token) return;
+    try {
+      const res = await fetch('/api/settings/faq', { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setFaqs(data.faqs || []);
+      }
+    } catch {
+      // Leave the list as-is — the form stays usable to retry.
+    }
+  };
 
   useEffect(() => {
     const token = localStorage.getItem('pinkku_token');
@@ -54,7 +84,43 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
       .then(res => (res.ok ? res.json() : null))
       .then(data => { if (data) setFacebookAutoReply(!!data.enabled); })
       .catch(() => {});
+    loadFaqs();
   }, []);
+
+  const handleAddFaq = async () => {
+    if (!newFaq.question.trim() || !newFaq.answer.trim()) return;
+    setFaqError('');
+    setFaqSaving(true);
+    const token = localStorage.getItem('pinkku_token');
+    try {
+      const res = await fetch('/api/settings/faq', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(newFaq),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFaqError(data.error || 'Could not save this FAQ.');
+        return;
+      }
+      setNewFaq({ question: '', keywords: '', answer: '' });
+      await loadFaqs();
+    } catch {
+      setFaqError('Could not save this FAQ.');
+    } finally {
+      setFaqSaving(false);
+    }
+  };
+
+  const handleDeleteFaq = async (id: string) => {
+    const token = localStorage.getItem('pinkku_token');
+    setFaqs(prev => prev.filter(f => f.id !== id));
+    try {
+      await fetch(`/api/settings/faq/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    } catch {
+      // The list already dropped it optimistically; a reload will restore it if the delete actually failed.
+    }
+  };
 
   const handleCopyTelegramLink = () => {
     navigator.clipboard.writeText(telegramLink);
@@ -112,9 +178,10 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
     setSentSuccess(false);
 
     try {
+      const token = localStorage.getItem('pinkku_token');
       const res = await fetch("/api/ai/generate-reply", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           customerMessage: selectedMsg.message,
           customerName: selectedMsg.customerName,
@@ -154,7 +221,7 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
           <div className="flex items-center gap-2">
             <MessageSquare className="w-6 h-6 text-blue-600" />
             <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-              Customer DMs & Auto-Reply Studio
+              Smart Engage
             </h1>
           </div>
           <p className="text-xs text-slate-500 font-medium mt-0.5">
@@ -221,6 +288,82 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
         >
           <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${facebookAutoReply ? 'translate-x-5' : ''}`} />
         </button>
+      </div>
+
+      {/* Frequently Asked Questions — a match here answers instantly, no
+          Gemini call, so common questions (price, delivery, payment...)
+          don't spend AI credits at all. Checked before the AI both in
+          auto-reply and in the manual "Regenerate" button below. */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-lg bg-indigo-100 text-indigo-600">
+              <HelpCircle className="w-3.5 h-3.5" />
+            </div>
+            <div>
+              <p className="text-xs font-black text-slate-900">Frequently Asked Questions</p>
+              <p className="text-[11px] text-slate-500 font-medium">Answered instantly for matching messages — no AI credits used.</p>
+            </div>
+          </div>
+          <span className="text-[11px] font-bold text-slate-400 shrink-0">{faqs.length}/{FAQ_MAX_ENTRIES}</span>
+        </div>
+
+        {faqs.length > 0 && (
+          <div className="space-y-2">
+            {faqs.map((faq) => (
+              <div key={faq.id} className="p-3 rounded-xl bg-slate-50/70 border border-slate-200/70 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-slate-800 truncate">{faq.question}</p>
+                  {faq.keywords && <p className="text-[10px] text-slate-400 font-medium truncate">Triggers: {faq.keywords}</p>}
+                  <p className="text-[11px] text-slate-600 font-medium mt-1 line-clamp-2">{faq.answer}</p>
+                </div>
+                <button
+                  onClick={() => handleDeleteFaq(faq.id)}
+                  className="p-1.5 rounded-lg border border-slate-200 hover:bg-rose-50 hover:border-rose-300 text-slate-400 hover:text-rose-600 shrink-0"
+                  title="Delete FAQ"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {faqs.length < FAQ_MAX_ENTRIES ? (
+          <div className="p-3 rounded-xl border border-dashed border-slate-200 space-y-2">
+            <input
+              type="text"
+              value={newFaq.question}
+              onChange={(e) => setNewFaq(prev => ({ ...prev, question: e.target.value }))}
+              placeholder="Question (e.g. ဈေးနှုန်း ဘယ်လောက်လဲ / What's the price?)"
+              className="w-full p-2.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-800 bg-white outline-none focus:ring-2 focus:ring-indigo-400"
+            />
+            <input
+              type="text"
+              value={newFaq.keywords}
+              onChange={(e) => setNewFaq(prev => ({ ...prev, keywords: e.target.value }))}
+              placeholder="Trigger words, comma-separated (optional — defaults to the question above)"
+              className="w-full p-2.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-800 bg-white outline-none focus:ring-2 focus:ring-indigo-400"
+            />
+            <textarea
+              rows={2}
+              value={newFaq.answer}
+              onChange={(e) => setNewFaq(prev => ({ ...prev, answer: e.target.value }))}
+              placeholder="Answer to send automatically"
+              className="w-full p-2.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-800 bg-white outline-none focus:ring-2 focus:ring-indigo-400"
+            />
+            {faqError && <p className="text-[11px] font-bold text-rose-600">{faqError}</p>}
+            <button
+              onClick={handleAddFaq}
+              disabled={faqSaving || !newFaq.question.trim() || !newFaq.answer.trim()}
+              className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Plus className="w-3.5 h-3.5" /> {faqSaving ? 'Saving...' : 'Add FAQ'}
+            </button>
+          </div>
+        ) : (
+          <p className="text-[11px] text-slate-400 font-medium">Limit reached — delete one above to add another.</p>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

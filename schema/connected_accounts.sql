@@ -11,3 +11,8 @@ CREATE TABLE IF NOT EXISTS connected_accounts (
   connected_at TEXT NOT NULL,
   PRIMARY KEY (user_id, platform)
 );
+
+-- Incoming Facebook/Telegram webhooks look up the owning account by
+-- (platform, external_id) — e.g. a Messenger event's Page id — not by the
+-- (user_id, platform) primary key, which doesn't help that lookup.
+CREATE INDEX IF NOT EXISTS idx_connected_accounts_platform_external ON connected_accounts(platform, external_id);

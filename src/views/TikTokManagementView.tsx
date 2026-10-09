@@ -170,7 +170,7 @@ export const TikTokManagementView: React.FC<TikTokManagementViewProps> = ({ user
     setIsDisconnecting(false);
     setShowDisconnectConfirm(false);
     onDisconnected();
-    onSelectTab('connections');
+    onSelectTab('creator');
   };
 
   const tiktokPosts = posts.filter(p => p.platforms.includes('tiktok'));
@@ -193,12 +193,12 @@ export const TikTokManagementView: React.FC<TikTokManagementViewProps> = ({ user
           <PlugZap className="w-7 h-7" />
         </div>
         <h2 className="text-lg font-black text-slate-900">TikTok isn't connected yet</h2>
-        <p className="text-xs text-slate-500 font-medium">Connect your TikTok account from the Spider Connect Hub to manage it here.</p>
+        <p className="text-xs text-slate-500 font-medium">Connect your TikTok account from Publish &gt; Connect accounts to manage it here.</p>
         <button
-          onClick={() => onSelectTab('connections')}
+          onClick={() => onSelectTab('creator')}
           className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-[#FF2D85] text-white font-extrabold text-xs shadow-md shadow-pink-500/25"
         >
-          Go to Spider Connect Hub
+          Go to Publish
         </button>
       </div>
     );
@@ -262,7 +262,7 @@ export const TikTokManagementView: React.FC<TikTokManagementViewProps> = ({ user
         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 flex items-center justify-between gap-3 text-xs font-bold text-amber-800">
           <span className="flex items-center gap-2"><AlertCircle className="w-4 h-4 shrink-0" /> Your TikTok connection needs to be refreshed.</span>
           <button
-            onClick={() => onSelectTab('connections')}
+            onClick={() => onSelectTab('creator')}
             className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white shrink-0"
           >
             Reconnect TikTok

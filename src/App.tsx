@@ -5,14 +5,15 @@ import { Navbar } from './components/Navbar';
 import { Sidebar, TabType } from './components/Sidebar';
 import { AuthModal } from './components/AuthModal';
 import { TelegramConnectModal } from './components/TelegramConnectModal';
+import { FacebookPagePickerModal } from './components/FacebookPagePickerModal';
 import { UpgradeModal } from './components/UpgradeModal';
 import { ApiKeyModal } from './components/ApiKeyModal';
+import { ConnectAccountsModal } from './components/ConnectAccountsModal';
 import { LandingPage } from './views/LandingPage';
 import { DashboardView } from './views/DashboardView';
 import { ContentCreatorView } from './views/ContentCreatorView';
 import { ContentCalendarView } from './views/ContentCalendarView';
 import { CustomerReplyView } from './views/CustomerReplyView';
-import { ConnectionsView } from './views/ConnectionsView';
 import { GmailAIView } from './views/GmailAIView';
 import { AISmartScheduleView } from './views/AISmartScheduleView';
 import { TikTokManagementView } from './views/TikTokManagementView';
@@ -50,6 +51,8 @@ export const App: React.FC = () => {
   const [isUpgradeOpen, setIsUpgradeOpen] = useState(false);
   const [isApiKeyOpen, setIsApiKeyOpen] = useState(false);
   const [isTelegramConnectOpen, setIsTelegramConnectOpen] = useState(false);
+  const [isConnectAccountsOpen, setIsConnectAccountsOpen] = useState(false);
+  const [fbPageSelectionToken, setFbPageSelectionToken] = useState<string | null>(null);
 
   const [connectNotice, setConnectNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -68,8 +71,9 @@ export const App: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
     const connected = params.get('connected');
     const connectError = params.get('connect_error');
+    const fbSelectPages = params.get('fb_select_pages');
 
-    if (connected || connectError) {
+    if (connected || connectError || fbSelectPages) {
       if (connected) {
         setConnectNotice({ type: 'success', message: `${connected.charAt(0).toUpperCase() + connected.slice(1)} connected successfully!` });
       } else if (connectError) {
@@ -81,6 +85,8 @@ export const App: React.FC = () => {
           no_pages: 'No Facebook Pages found — you need to be an admin of at least one Page to connect.',
         };
         setConnectNotice({ type: 'error', message: messages[connectError] || 'Could not connect that channel.' });
+      } else if (fbSelectPages) {
+        setFbPageSelectionToken(fbSelectPages);
       }
       window.history.replaceState({}, '', window.location.pathname);
     }
@@ -284,6 +290,23 @@ export const App: React.FC = () => {
     }
   };
 
+  const handlePublishNow = async (id: string): Promise<{ success: boolean; results?: Record<string, { ok: boolean; error?: string }> }> => {
+    const token = localStorage.getItem('pinkku_token');
+    try {
+      const res = await fetch(`/api/posts/${id}/publish`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      const status: SocialPost['status'] = data.status === 'published' ? 'published' : 'failed';
+      setPosts(prev => prev.map(p => (p.id === id ? { ...p, status } : p)));
+      return { success: !!data.success, results: data.results };
+    } catch {
+      setPosts(prev => prev.map(p => (p.id === id ? { ...p, status: 'failed' } : p)));
+      return { success: false };
+    }
+  };
+
   const handleRequestChanges = async (id: string) => {
     const token = localStorage.getItem('pinkku_token');
     setPosts(prev => prev.map(p => (p.id === id ? { ...p, status: 'draft' } : p)));
@@ -403,6 +426,8 @@ export const App: React.FC = () => {
             <ContentCreatorView
               user={user}
               onSavePost={handleSavePost}
+              connections={connections}
+              onOpenConnectAccounts={() => setIsConnectAccountsOpen(true)}
             />
           )}
 
@@ -412,6 +437,7 @@ export const App: React.FC = () => {
               onCreatePost={() => setCurrentTab('creator')}
               onSubmitForReview={handleSubmitForReview}
               onApprovePost={handleApprovePost}
+              onPublishNow={handlePublishNow}
               onRequestChanges={handleRequestChanges}
               onDeleteDraft={handleDeleteDraft}
             />
@@ -422,15 +448,6 @@ export const App: React.FC = () => {
               user={user}
               messages={messages}
               onUpdateMessage={handleUpdateMessage}
-            />
-          )}
-
-          {currentTab === 'connections' && (
-            <ConnectionsView
-              connections={connections}
-              onToggleConnection={handleToggleConnection}
-              onRefreshAll={handleRefreshConnections}
-              onSelectTab={setCurrentTab}
             />
           )}
 
@@ -497,7 +514,10 @@ export const App: React.FC = () => {
         isOpen={isApiKeyOpen}
         onClose={() => setIsApiKeyOpen(false)}
         onSaveKey={(key) => {
-          console.log("Custom Gemini Key Saved");
+          setConnectNotice({
+            type: 'success',
+            message: key ? 'Your Gemini API key is saved — AI features now use your own quota.' : 'Your Gemini API key was removed — back to the shared quota.',
+          });
         }}
       />
 
@@ -506,6 +526,24 @@ export const App: React.FC = () => {
         onClose={() => setIsTelegramConnectOpen(false)}
         onConnected={(accountName) => {
           setConnectNotice({ type: 'success', message: `Telegram bot ${accountName} connected successfully!` });
+          fetchRealConnections();
+        }}
+      />
+
+      <ConnectAccountsModal
+        isOpen={isConnectAccountsOpen}
+        onClose={() => setIsConnectAccountsOpen(false)}
+        connections={connections}
+        onToggleConnection={handleToggleConnection}
+        onRefreshAll={handleRefreshConnections}
+        onSelectTab={setCurrentTab}
+      />
+
+      <FacebookPagePickerModal
+        token={fbPageSelectionToken}
+        onClose={() => setFbPageSelectionToken(null)}
+        onConnected={() => {
+          setConnectNotice({ type: 'success', message: 'Facebook Page connected successfully!' });
           fetchRealConnections();
         }}
       />

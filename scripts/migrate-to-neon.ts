@@ -41,6 +41,8 @@ const TABLES = [
   'telegram_groups',
   'customer_messages',
   'posts',
+  'post_targets',
+  'faq_entries',
 ];
 
 async function applySchema() {

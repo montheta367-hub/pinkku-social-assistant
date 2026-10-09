@@ -240,10 +240,10 @@ export const AISmartScheduleView: React.FC<AISmartScheduleViewProps> = ({ user, 
           Pinkku reads your inbox, detects meetings and deadlines, and turns them into a daily plan automatically.
         </p>
         <button
-          onClick={() => onSelectTab('connections')}
+          onClick={() => onSelectTab('creator')}
           className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-[#FF2D85] text-white font-extrabold text-xs shadow-md shadow-pink-500/25"
         >
-          Go to Connections
+          Go to Publish
         </button>
       </div>
     );

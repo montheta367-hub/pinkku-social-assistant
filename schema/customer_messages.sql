@@ -14,3 +14,6 @@ CREATE TABLE IF NOT EXISTS customer_messages (
 
 -- Migration for an existing customer_messages table (safe to re-run).
 ALTER TABLE customer_messages ADD COLUMN IF NOT EXISTS reply_text TEXT;
+
+-- GET /api/messages lists a user's inbox ordered by created_at.
+CREATE INDEX IF NOT EXISTS idx_customer_messages_user_created ON customer_messages(user_id, created_at DESC);

@@ -4,12 +4,10 @@ import {
   PenTool,
   Calendar,
   MessageSquare,
-  Share2,
   Mail,
   Bot,
   BarChart3,
   Settings,
-  Sparkles,
   Music2,
   CalendarClock
 } from 'lucide-react';
@@ -21,7 +19,6 @@ export type TabType =
   | 'creator'
   | 'calendar'
   | 'messages'
-  | 'connections'
   | 'gmail'
   | 'schedule'
   | 'tiktok'
@@ -45,10 +42,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const connectedCount = connections.filter(c => c.connected).length;
   const menuItems = [
     { id: 'dashboard' as TabType, label: 'Overview', icon: LayoutDashboard },
-    { id: 'creator' as TabType, label: 'Smart Content Studio', icon: PenTool, badge: 'AI' },
+    { id: 'creator' as TabType, label: 'Publish', icon: PenTool, badge: 'AI' },
     { id: 'calendar' as TabType, label: 'Social Calendar', icon: Calendar },
-    { id: 'messages' as TabType, label: 'Customer DMs', icon: MessageSquare, count: unreadMessagesCount },
-    { id: 'connections' as TabType, label: 'Social Connection', icon: Share2 },
+    { id: 'messages' as TabType, label: 'Engage', icon: MessageSquare, count: unreadMessagesCount },
     { id: 'gmail' as TabType, label: 'Google Business Inbox', icon: Mail },
     { id: 'schedule' as TabType, label: 'Smart Schedule', icon: CalendarClock },
     { id: 'tiktok' as TabType, label: 'TikTok Management', icon: Music2 },

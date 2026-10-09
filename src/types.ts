@@ -43,6 +43,7 @@ export interface SocialPost {
   mediaUrl?: string;
   tone?: string;
   tags?: string[];
+  targets?: { platform: PlatformType; status: 'pending' | 'published' | 'failed'; error?: string; externalId?: string }[];
   createdAt: string;
 }
 

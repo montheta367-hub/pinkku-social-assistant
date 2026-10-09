@@ -13,3 +13,6 @@ CREATE TABLE IF NOT EXISTS schedule_events (
   created_at TEXT NOT NULL,
   PRIMARY KEY (user_id, id)
 );
+
+-- GET /api/schedule/events lists a user's events.
+CREATE INDEX IF NOT EXISTS idx_schedule_events_user ON schedule_events(user_id);

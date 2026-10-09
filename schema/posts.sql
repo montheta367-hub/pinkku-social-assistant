@@ -13,7 +13,14 @@ CREATE TABLE IF NOT EXISTS posts (
   status TEXT NOT NULL DEFAULT 'draft',
   tone TEXT,
   tags TEXT,
+  media_url TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   PRIMARY KEY (user_id, id)
 );
+
+-- GET /api/posts lists a user's posts ordered by created_at; this covers
+-- both the WHERE and the ORDER BY in one index.
+CREATE INDEX IF NOT EXISTS idx_posts_user_created ON posts(user_id, created_at DESC);
+-- publishDuePosts() (app.ts) sweeps WHERE status = 'scheduled' every minute.
+CREATE INDEX IF NOT EXISTS idx_posts_status ON posts(status);

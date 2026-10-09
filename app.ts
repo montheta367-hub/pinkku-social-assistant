@@ -5,7 +5,7 @@ import { GoogleGenAI } from '@google/genai';
 import { OAuth2Client } from 'google-auth-library';
 import { Resend } from 'resend';
 import { selectOne, selectMany, insertRow, updateRows, upsertRow, deleteRows } from './db.js';
-import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
+import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash, createCipheriv, createDecipheriv } from 'node:crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -38,7 +38,9 @@ app.use(cors({
     callback(new Error('Not allowed by CORS'));
   },
 }));
-app.use(express.json());
+// Default 100kb limit is too small for a post's attached photo, which rides
+// along as a base64 data: URL in the JSON body (see parseDataUrl above).
+app.use(express.json({ limit: '15mb' }));
 
 // ---------------------------------------------------------------------------
 // Database (Neon Postgres — schema lives in schema/*.sql, one file per
@@ -76,6 +78,13 @@ function verifyPassword(password: string, stored: string): boolean {
   const keyBuffer = Buffer.from(key, 'hex');
   return derived.length === keyBuffer.length && timingSafeEqual(derived, keyBuffer);
 }
+
+// Used by /api/auth/login when the email doesn't match any account, so a
+// non-existent email still pays the same scrypt cost as a real one — without
+// this, an attacker could tell registered emails apart from unregistered
+// ones just by how fast the response comes back, even though both get the
+// same "Invalid email or password" message.
+const DUMMY_PASSWORD_HASH = hashPassword(randomUUID());
 
 interface UserRow {
   id: string;
@@ -197,16 +206,85 @@ async function consumeOAuthState(state: string, platform?: string): Promise<{ us
   return data;
 }
 
+// Encrypts access_token/refresh_token at rest (AES-256-GCM) so a database
+// leak alone doesn't hand over a working Facebook Page / Gmail / TikTok
+// token. Optional: without TOKEN_ENCRYPTION_KEY set, tokens are stored as
+// plaintext exactly like before — this only hardens deployments that opt in.
+// Any 32-byte key works; TOKEN_ENCRYPTION_KEY is hashed with SHA-256 first so
+// a plain passphrase of any length is fine too.
+const TOKEN_ENCRYPTION_KEY = process.env.TOKEN_ENCRYPTION_KEY
+  ? createHash('sha256').update(process.env.TOKEN_ENCRYPTION_KEY).digest()
+  : null;
+const ENCRYPTED_PREFIX = 'enc:v1:';
+
+function encryptSecret(value: string | null | undefined): string | null | undefined {
+  if (value === null || value === undefined || !TOKEN_ENCRYPTION_KEY) return value;
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', TOKEN_ENCRYPTION_KEY, iv);
+  const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return ENCRYPTED_PREFIX + Buffer.concat([iv, authTag, ciphertext]).toString('base64');
+}
+
+function decryptSecret(value: string | null | undefined): string | null | undefined {
+  if (value === null || value === undefined || !value.startsWith(ENCRYPTED_PREFIX)) return value;
+  if (!TOKEN_ENCRYPTION_KEY) {
+    console.error('[security] Found an encrypted token but TOKEN_ENCRYPTION_KEY is not set — cannot decrypt.');
+    return null;
+  }
+  try {
+    const raw = Buffer.from(value.slice(ENCRYPTED_PREFIX.length), 'base64');
+    const iv = raw.subarray(0, 12);
+    const authTag = raw.subarray(12, 28);
+    const ciphertext = raw.subarray(28);
+    const decipher = createDecipheriv('aes-256-gcm', TOKEN_ENCRYPTION_KEY, iv);
+    decipher.setAuthTag(authTag);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+  } catch (err) {
+    console.error('[security] Failed to decrypt a stored token:', err);
+    return null;
+  }
+}
+
+// connected_accounts is the only table holding real third-party secrets
+// (access_token/refresh_token) — every read and write of it funnels through
+// these three helpers so encryption stays consistent no matter which
+// platform's connect flow is calling.
+function encryptAccountSecrets(row: Record<string, any>): Record<string, any> {
+  const out = { ...row };
+  if ('access_token' in out) out.access_token = encryptSecret(out.access_token);
+  if ('refresh_token' in out) out.refresh_token = encryptSecret(out.refresh_token);
+  return out;
+}
+
+function decryptAccountRow<T extends { access_token?: string | null; refresh_token?: string | null }>(
+  row: T | undefined
+): T | undefined {
+  if (!row) return row;
+  if ('access_token' in row) (row as any).access_token = decryptSecret(row.access_token);
+  if ('refresh_token' in row) (row as any).refresh_token = decryptSecret(row.refresh_token);
+  return row;
+}
+
 async function upsertConnectedAccount(row: Record<string, any>): Promise<void> {
-  await upsertRow('connected_accounts', row, ['user_id', 'platform']);
+  await upsertRow('connected_accounts', encryptAccountSecrets(row), ['user_id', 'platform']);
 }
 
 async function getConnectedAccount(userId: string, platform: string): Promise<ConnectedAccountRow | undefined> {
-  return selectOne<ConnectedAccountRow>('connected_accounts', { user_id: userId, platform });
+  const row = await selectOne<ConnectedAccountRow>('connected_accounts', { user_id: userId, platform });
+  return decryptAccountRow(row);
+}
+
+// Incoming platform webhooks (e.g. a Facebook Messenger event) key off the
+// page/account id Meta sends, not off our own user_id — see the idx on
+// (platform, external_id) in schema/connected_accounts.sql.
+async function getConnectedAccountByExternalId(platform: string, externalId: string): Promise<ConnectedAccountRow | undefined> {
+  const row = await selectOne<ConnectedAccountRow>('connected_accounts', { platform, external_id: externalId });
+  return decryptAccountRow(row);
 }
 
 async function updateConnectedAccount(userId: string, platform: string, patch: Record<string, any>): Promise<void> {
-  await updateRows('connected_accounts', { user_id: userId, platform }, patch);
+  await updateRows('connected_accounts', { user_id: userId, platform }, encryptAccountSecrets(patch));
 }
 
 // ---------------------------------------------------------------------------
@@ -267,15 +345,38 @@ async function sendWelcomeEmail(toEmail: string, name: string): Promise<boolean>
 // Lazy-init Gemini Client
 // ---------------------------------------------------------------------------
 let geminiClient: GoogleGenAI | null = null;
-function getGemini(): GoogleGenAI {
+// Pass a user's own key (see resolveGeminiApiKey below) to get a one-off
+// client for that call instead of the shared cached one — the shared
+// instance stays pinned to the server's own GEMINI_API_KEY since different
+// users can have different keys from call to call.
+function getGemini(apiKey?: string): GoogleGenAI {
+  if (apiKey) return new GoogleGenAI({ apiKey });
   if (!geminiClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    const envKey = process.env.GEMINI_API_KEY;
+    if (!envKey) {
       console.warn("GEMINI_API_KEY is not set in environment.");
     }
-    geminiClient = new GoogleGenAI({ apiKey: apiKey || '' });
+    geminiClient = new GoogleGenAI({ apiKey: envKey || '' });
   }
   return geminiClient;
+}
+
+// Bring-your-own-key: a user who set their own Gemini key in Settings uses
+// it (and their own quota/billing) for every AI feature instead of the
+// shared server key — important once more than one business signs up, so
+// one account's usage can't drain the app owner's own API budget.
+async function getUserGeminiKey(userId: string): Promise<string | undefined> {
+  const row = await selectOne<{ gemini_api_key: string | null }>('users', { id: userId }, 'gemini_api_key');
+  const decrypted = decryptSecret(row?.gemini_api_key ?? null);
+  return decrypted || undefined;
+}
+
+async function resolveGeminiApiKey(userId?: string | null): Promise<string | undefined> {
+  if (userId) {
+    const userKey = await getUserGeminiKey(userId);
+    if (userKey) return userKey;
+  }
+  return process.env.GEMINI_API_KEY || undefined;
 }
 
 // Gemini's free tier has a low requests-per-minute cap, and this app fires
@@ -356,11 +457,15 @@ app.post('/api/auth/login', loginRateLimiter, async (req, res) => {
   const normalizedEmail = String(email).toLowerCase().trim();
   const existing = await findUserByEmail(normalizedEmail);
 
-  if (!existing) {
-    return res.status(401).json({ error: 'No account found with this email. Please sign up first.' });
-  }
-  if (!existing.password_hash || !verifyPassword(password, existing.password_hash)) {
-    return res.status(401).json({ error: 'Incorrect password.' });
+  // Same generic error and (via the dummy hash) same response time whether
+  // the email doesn't exist, has no password (Google-only account), or the
+  // password is simply wrong — so a login attempt can't be used to check
+  // which emails have a Pinkku account.
+  const passwordOk = existing?.password_hash
+    ? verifyPassword(password, existing.password_hash)
+    : verifyPassword(password, DUMMY_PASSWORD_HASH);
+  if (!existing || !passwordOk) {
+    return res.status(401).json({ error: 'Invalid email or password.' });
   }
 
   return res.json({
@@ -515,11 +620,10 @@ app.get('/api/oauth/google/callback', async (req, res) => {
     // app+user — keep the previously stored one on reconnects that don't get a new one.
     let refreshToken = tokenData.refresh_token || null;
     if (!refreshToken) {
-      const existing = await selectOne<{ refresh_token: string | null }>(
-        'connected_accounts',
-        { user_id: stateRow.user_id, platform: 'gmail' },
-        'refresh_token'
-      );
+      // Goes through getConnectedAccount (not a raw selectOne) so the
+      // existing token comes back decrypted — upsertConnectedAccount below
+      // re-encrypts it when it writes the row back.
+      const existing = await getConnectedAccount(stateRow.user_id, 'gmail');
       refreshToken = existing?.refresh_token || null;
     }
 
@@ -554,6 +658,66 @@ const FACEBOOK_REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI || `http://local
 // (instagram_business_basic, etc.), so the old Page-linked Instagram scopes
 // below are rejected as invalid until that's set up too.
 const FACEBOOK_SCOPES = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'pages_manage_metadata', 'pages_messaging'].join(',');
+
+// Connects one Facebook Page (and its linked Instagram Business account, if
+// any) for a user. Shared by the auto-connect path (only one Page found) and
+// the page-picker path (/api/oauth/facebook/select-page, for users who admin
+// more than one Page).
+async function connectFacebookPage(userId: string, page: { id: string; name: string; access_token: string }): Promise<void> {
+  await upsertConnectedAccount({
+    user_id: userId,
+    platform: 'facebook',
+    account_name: page.name,
+    external_id: page.id,
+    access_token: page.access_token,
+    connected_at: new Date().toISOString(),
+  });
+
+  // Subscribe this Page to the app's webhook for the "messages" field, so
+  // incoming Messenger DMs start POSTing to /api/facebook/webhook below
+  // instead of just sitting unread in the Page's own inbox.
+  try {
+    const subRes = await fetch(
+      `https://graph.facebook.com/${FACEBOOK_API_VERSION}/${page.id}/subscribed_apps?subscribed_fields=messages&access_token=${encodeURIComponent(page.access_token)}`,
+      { method: 'POST' }
+    );
+    const subData: any = await subRes.json();
+    if (!subRes.ok || subData.error) {
+      console.error('[oauth] Facebook Page webhook subscription rejected (non-fatal):', subData);
+    }
+  } catch (subErr) {
+    console.error('[oauth] Facebook Page webhook subscription error (non-fatal):', subErr);
+  }
+
+  // Instagram Business accounts connect through the same Facebook Page —
+  // check if this Page has one linked, and connect it too if so.
+  try {
+    const igLookupRes = await fetch(
+      `https://graph.facebook.com/${FACEBOOK_API_VERSION}/${page.id}?fields=instagram_business_account&access_token=${encodeURIComponent(page.access_token)}`
+    );
+    const igLookupData: any = await igLookupRes.json();
+    const igAccountId = igLookupData.instagram_business_account?.id;
+
+    if (igAccountId) {
+      const igDetailsRes = await fetch(
+        `https://graph.facebook.com/${FACEBOOK_API_VERSION}/${igAccountId}?fields=username,name,profile_picture_url&access_token=${encodeURIComponent(page.access_token)}`
+      );
+      const igDetails: any = await igDetailsRes.json();
+
+      await upsertConnectedAccount({
+        user_id: userId,
+        platform: 'instagram',
+        account_name: igDetails.username ? `@${igDetails.username}` : (igDetails.name || 'Instagram Account'),
+        avatar: igDetails.profile_picture_url || null,
+        external_id: igAccountId,
+        access_token: page.access_token,
+        connected_at: new Date().toISOString(),
+      });
+    }
+  } catch (igErr) {
+    console.error('[oauth] Instagram lookup error (non-fatal):', igErr);
+  }
+}
 
 app.post('/api/oauth/facebook/start', requireAuth, async (req: AuthedRequest, res) => {
   const appId = process.env.FACEBOOK_APP_ID;
@@ -620,77 +784,72 @@ app.get('/api/oauth/facebook/callback', async (req, res) => {
 
     // 3) Find the Facebook Pages this user administers.
     const pagesRes = await fetch(
-      `https://graph.facebook.com/${FACEBOOK_API_VERSION}/me/accounts?access_token=${encodeURIComponent(userAccessToken)}`
+      `https://graph.facebook.com/${FACEBOOK_API_VERSION}/me/accounts?fields=id,name,picture,access_token&access_token=${encodeURIComponent(userAccessToken)}`
     );
     const pagesData: any = await pagesRes.json();
     if (!pagesRes.ok || pagesData.error) {
       console.error('[oauth] Facebook pages fetch failed:', pagesData);
       return res.redirect('/?connect_error=no_pages');
     }
-    const page = (pagesData.data || [])[0];
-    if (!page) {
+    const pages = pagesData.data || [];
+    if (pages.length === 0) {
       return res.redirect('/?connect_error=no_pages');
     }
 
-    await upsertConnectedAccount({
-      user_id: stateRow.user_id,
-      platform: 'facebook',
-      account_name: page.name,
-      external_id: page.id,
-      access_token: page.access_token,
-      connected_at: new Date().toISOString(),
-    });
-
-    // Subscribe this Page to the app's webhook for the "messages" field, so
-    // incoming Messenger DMs start POSTing to /api/facebook/webhook below
-    // instead of just sitting unread in the Page's own inbox.
-    try {
-      const subRes = await fetch(
-        `https://graph.facebook.com/${FACEBOOK_API_VERSION}/${page.id}/subscribed_apps?subscribed_fields=messages&access_token=${encodeURIComponent(page.access_token)}`,
-        { method: 'POST' }
-      );
-      const subData: any = await subRes.json();
-      if (!subRes.ok || subData.error) {
-        console.error('[oauth] Facebook Page webhook subscription rejected (non-fatal):', subData);
-      }
-    } catch (subErr) {
-      console.error('[oauth] Facebook Page webhook subscription error (non-fatal):', subErr);
+    // Only one Page admined — connect it directly, no picker needed.
+    if (pages.length === 1) {
+      await connectFacebookPage(stateRow.user_id, pages[0]);
+      return res.redirect('/?connected=facebook');
     }
 
-    // 4) Instagram Business accounts connect through the same Facebook Page —
-    // check if this Page has one linked, and connect it too if so.
-    try {
-      const igLookupRes = await fetch(
-        `https://graph.facebook.com/${FACEBOOK_API_VERSION}/${page.id}?fields=instagram_business_account&access_token=${encodeURIComponent(page.access_token)}`
-      );
-      const igLookupData: any = await igLookupRes.json();
-      const igAccountId = igLookupData.instagram_business_account?.id;
-
-      if (igAccountId) {
-        const igDetailsRes = await fetch(
-          `https://graph.facebook.com/${FACEBOOK_API_VERSION}/${igAccountId}?fields=username,name,profile_picture_url&access_token=${encodeURIComponent(page.access_token)}`
-        );
-        const igDetails: any = await igDetailsRes.json();
-
-        await upsertConnectedAccount({
-          user_id: stateRow.user_id,
-          platform: 'instagram',
-          account_name: igDetails.username ? `@${igDetails.username}` : (igDetails.name || 'Instagram Account'),
-          avatar: igDetails.profile_picture_url || null,
-          external_id: igAccountId,
-          access_token: page.access_token,
-          connected_at: new Date().toISOString(),
-        });
-      }
-    } catch (igErr) {
-      console.error('[oauth] Instagram lookup error (non-fatal):', igErr);
-    }
-
-    return res.redirect('/?connected=facebook');
+    // More than one Page — stash the options server-side and let the user
+    // pick which one to connect, rather than silently grabbing the first.
+    const selectionToken = await createOAuthState(
+      stateRow.user_id,
+      'facebook_pages',
+      JSON.stringify({
+        pages: pages.map((p: any) => ({ id: p.id, name: p.name, picture: p.picture?.data?.url, access_token: p.access_token })),
+      })
+    );
+    return res.redirect(`/?fb_select_pages=${selectionToken}`);
   } catch (err) {
     console.error('[oauth] Facebook callback error:', err);
     return res.redirect('/?connect_error=server_error');
   }
+});
+
+// Lists the Pages stashed by the callback above when a user admins more than
+// one, so the frontend can render a picker. Page access tokens are kept out
+// of the response — the client only ever sees id/name/picture.
+app.get('/api/oauth/facebook/pending-pages', requireAuth, async (req: AuthedRequest, res) => {
+  const token = String(req.query.token || '');
+  if (!token) return res.status(400).json({ error: 'Missing token' });
+
+  const stateRow = await selectOne<{ user_id: string; extra: string | null }>('oauth_states', { state: token, platform: 'facebook_pages' });
+  if (!stateRow || stateRow.user_id !== req.user!.id) {
+    return res.status(404).json({ error: 'That page selection has expired. Please reconnect Facebook.' });
+  }
+
+  const { pages } = JSON.parse(stateRow.extra || '{}');
+  return res.json({ pages: (pages || []).map((p: any) => ({ id: p.id, name: p.name, picture: p.picture })) });
+});
+
+// Finishes the page-picker flow: connects the one Page the user chose.
+app.post('/api/oauth/facebook/select-page', requireAuth, async (req: AuthedRequest, res) => {
+  const { token, pageId } = req.body || {};
+  if (!token || !pageId) return res.status(400).json({ error: 'Missing token or pageId' });
+
+  const stateRow = await consumeOAuthState(String(token), 'facebook_pages');
+  if (!stateRow || stateRow.user_id !== req.user!.id) {
+    return res.status(404).json({ error: 'That page selection has expired. Please reconnect Facebook.' });
+  }
+
+  const { pages } = JSON.parse(stateRow.extra || '{}');
+  const page = (pages || []).find((p: any) => p.id === pageId);
+  if (!page) return res.status(400).json({ error: 'Unknown page.' });
+
+  await connectFacebookPage(req.user!.id, page);
+  return res.json({ ok: true });
 });
 
 // ---------------------------------------------------------------------------
@@ -935,13 +1094,13 @@ app.get('/api/tiktok/status', requireAuth, async (req: AuthedRequest, res) => {
 // (unlike an inbox/auto-reply, which needs API access Pinkku doesn't have):
 // suggests an attractive caption, hashtags, and concrete growth tips tailored
 // to short-form video, using the same Gemini model as the rest of Pinkku's AI.
-app.post('/api/tiktok/content-tips', requireAuth, async (req, res) => {
+app.post('/api/tiktok/content-tips', requireAuth, async (req: AuthedRequest, res) => {
   const { topic, businessType } = req.body;
   if (!topic || !String(topic).trim()) {
     return res.status(400).json({ error: 'topic is required.' });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = await resolveGeminiApiKey(req.user!.id);
   if (!apiKey) {
     return res.json({
       caption: `✨ ${topic} — you don't want to miss this! 🔥`,
@@ -955,7 +1114,7 @@ app.post('/api/tiktok/content-tips', requireAuth, async (req, res) => {
   }
 
   try {
-    const ai = getGemini();
+    const ai = getGemini(apiKey);
     const prompt = `You are a TikTok growth strategist helping a Myanmar small business (type: "${businessType || 'General Retail'}") plan a short-form video about: "${topic}".
 
 Give practical, TikTok-specific advice — not generic social media tips. Consider hooks, pacing, trending audio, and hashtag strategy for the Myanmar/Southeast Asian TikTok audience.
@@ -1087,6 +1246,103 @@ app.patch('/api/settings/facebook-auto-reply', requireAuth, async (req: AuthedRe
   return res.json({ success: true, enabled: !!enabled });
 });
 
+// ---------------------------------------------------------------------------
+// FAQ — up to ~6 canned Q&A pairs, checked by findFaqMatch above before any
+// Gemini call. Deliberately capped at 6 here (not just in the UI) since
+// that's the whole point: a short, easy-to-scan list, not a knowledge base.
+// ---------------------------------------------------------------------------
+const FAQ_MAX_ENTRIES = 6;
+
+app.get('/api/settings/faq', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const rows = await selectMany('faq_entries', { user_id: req.user!.id }, { orderBy: 'created_at', ascending: true });
+    return res.json({
+      faqs: rows.map((r: any) => ({ id: r.id, question: r.question, keywords: r.keywords || '', answer: r.answer })),
+    });
+  } catch (err) {
+    console.error('[faq] list error:', err);
+    return res.status(500).json({ error: 'Could not load your FAQ list.' });
+  }
+});
+
+app.post('/api/settings/faq', requireAuth, async (req: AuthedRequest, res) => {
+  const { question, keywords, answer } = req.body;
+  if (!question || !String(question).trim()) return res.status(400).json({ error: 'A question is required.' });
+  if (!answer || !String(answer).trim()) return res.status(400).json({ error: 'An answer is required.' });
+
+  try {
+    const existing = await selectMany('faq_entries', { user_id: req.user!.id });
+    if (existing.length >= FAQ_MAX_ENTRIES) {
+      return res.status(400).json({ error: `You can only save up to ${FAQ_MAX_ENTRIES} FAQs — delete one first.` });
+    }
+    const id = 'faq_' + randomUUID();
+    await insertRow('faq_entries', {
+      id,
+      user_id: req.user!.id,
+      question: String(question).trim(),
+      keywords: keywords ? String(keywords).trim() : null,
+      answer: String(answer).trim(),
+      created_at: new Date().toISOString(),
+    });
+    return res.json({ success: true, id });
+  } catch (err) {
+    console.error('[faq] create error:', err);
+    return res.status(500).json({ error: 'Could not save this FAQ.' });
+  }
+});
+
+app.patch('/api/settings/faq/:id', requireAuth, async (req: AuthedRequest, res) => {
+  const { question, keywords, answer } = req.body;
+  const patch: Record<string, any> = {};
+  if (question !== undefined) patch.question = String(question).trim();
+  if (keywords !== undefined) patch.keywords = keywords ? String(keywords).trim() : null;
+  if (answer !== undefined) patch.answer = String(answer).trim();
+
+  try {
+    await updateRows('faq_entries', { user_id: req.user!.id, id: req.params.id }, patch);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[faq] update error:', err);
+    return res.status(500).json({ error: 'Could not update this FAQ.' });
+  }
+});
+
+app.delete('/api/settings/faq/:id', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    await deleteRows('faq_entries', { user_id: req.user!.id, id: req.params.id });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[faq] delete error:', err);
+    return res.status(500).json({ error: 'Could not delete this FAQ.' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Bring-your-own Gemini key — see resolveGeminiApiKey above. The key itself
+// is never sent back to the browser once saved, only whether one is set.
+// ---------------------------------------------------------------------------
+app.get('/api/settings/gemini-key', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const key = await getUserGeminiKey(req.user!.id);
+    return res.json({ hasKey: !!key, preview: key ? `••••${key.slice(-4)}` : null });
+  } catch (err) {
+    console.error('[settings] gemini-key read error:', err);
+    return res.status(500).json({ error: 'Could not load this setting.' });
+  }
+});
+
+app.patch('/api/settings/gemini-key', requireAuth, async (req: AuthedRequest, res) => {
+  const { apiKey } = req.body;
+  try {
+    const trimmed = apiKey && String(apiKey).trim() ? String(apiKey).trim() : null;
+    await updateRows('users', { id: req.user!.id }, { gemini_api_key: encryptSecret(trimmed) ?? null });
+    return res.json({ success: true, hasKey: !!trimmed, preview: trimmed ? `••••${trimmed.slice(-4)}` : null });
+  } catch (err) {
+    console.error('[settings] gemini-key save error:', err);
+    return res.status(500).json({ error: 'Could not save this key.' });
+  }
+});
+
 function sendTelegramMessage(botToken: string, chatId: string | number, text: string) {
   return fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: 'POST',
@@ -1098,14 +1354,14 @@ function sendTelegramMessage(botToken: string, chatId: string | number, text: st
 // Scans a single Telegram customer message for a task/event/deadline —
 // feeds straight into AI Smart Schedule (schedule_events) alongside
 // whatever's detected from Gmail, same "Smart Workspace".
-async function detectEventInMessage(text: string, fromName: string): Promise<{
+async function detectEventInMessage(text: string, fromName: string, userId?: string): Promise<{
   eventDetected: boolean; eventTitle?: string; eventDate?: string; eventTime?: string | null; importance?: string;
 } | null> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = await resolveGeminiApiKey(userId);
   if (!apiKey) return null;
 
   try {
-    const ai = getGemini();
+    const ai = getGemini(apiKey);
     const today = new Date().toISOString().slice(0, 10);
     const prompt = `Today's date is ${today}. A Telegram message from "${fromName}" says: "${text}"
 
@@ -1123,6 +1379,33 @@ Output strictly a JSON object: { "eventDetected": boolean, "eventTitle": string|
     console.error('[telegram] event detection failed:', err);
     return null;
   }
+}
+
+// A business pre-writes up to ~6 canned Q&A pairs (mirrors a Facebook Page's
+// native "Frequently Asked Questions" automation) — see /api/settings/faq
+// below. A customer message that matches one is answered straight from that
+// row, with no Gemini call at all; only an unmatched message falls through
+// to generateAIReply. Used by both the Facebook/Telegram auto-reply path and
+// the manual "Regenerate" draft button, so the saving applies everywhere a
+// reply gets generated.
+function normalizeForFaqMatch(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+async function findFaqMatch(userId: string, customerMessage: string): Promise<{ question: string; answer: string } | null> {
+  const entries = await selectMany<{ question: string; keywords: string | null; answer: string }>('faq_entries', { user_id: userId });
+  if (!entries.length) return null;
+
+  const normalizedMessage = normalizeForFaqMatch(customerMessage);
+  for (const entry of entries) {
+    const triggers = (entry.keywords && entry.keywords.trim())
+      ? entry.keywords.split(',').map((k) => normalizeForFaqMatch(k)).filter(Boolean)
+      : [normalizeForFaqMatch(entry.question)];
+    if (triggers.some((trigger) => trigger && normalizedMessage.includes(trigger))) {
+      return { question: entry.question, answer: entry.answer };
+    }
+  }
+  return null;
 }
 
 // Handles one incoming Telegram update, delivered via webhook (see
@@ -1192,7 +1475,7 @@ async function handleTelegramUpdate(update: any): Promise<void> {
     const group = await selectOne<{ owner_user_id: string }>('telegram_groups', { chat_id: chatId }, 'owner_user_id');
     if (!group) return;
 
-    const detected = await detectEventInMessage(text, customerName);
+    const detected = await detectEventInMessage(text, customerName, group.owner_user_id);
     if (detected?.eventDetected && detected.eventDate) {
       await insertRow('schedule_events', {
         id: 'tg_' + randomUUID(),
@@ -1224,13 +1507,19 @@ async function handleTelegramUpdate(update: any): Promise<void> {
 
   if (owner?.telegram_auto_reply) {
     try {
-      const reply = await generateAIReply({
-        customerMessage: text,
-        customerName: finalCustomerName,
-        platform: 'telegram',
-        businessName: owner.business_name,
-      });
-      replyText = reply.suggestedReplyMyanmar || reply.suggestedReplyEnglish || null;
+      const faqMatch = await findFaqMatch(contact.owner_user_id, text);
+      if (faqMatch) {
+        replyText = faqMatch.answer;
+      } else {
+        const reply = await generateAIReply({
+          customerMessage: text,
+          customerName: finalCustomerName,
+          platform: 'telegram',
+          businessName: owner.business_name,
+          userId: contact.owner_user_id,
+        });
+        replyText = reply.suggestedReplyMyanmar || reply.suggestedReplyEnglish || null;
+      }
       if (replyText) {
         await sendTelegramMessage(botToken, msg.chat.id, replyText);
         status = 'replied';
@@ -1252,7 +1541,7 @@ async function handleTelegramUpdate(update: any): Promise<void> {
     created_at: new Date().toISOString(),
   });
 
-  const detected = await detectEventInMessage(text, finalCustomerName);
+  const detected = await detectEventInMessage(text, finalCustomerName, contact.owner_user_id);
   if (detected?.eventDetected && detected.eventDate) {
     await insertRow('schedule_events', {
       id: 'tg_' + randomUUID(),
@@ -1312,10 +1601,8 @@ async function handleFacebookEntry(entry: any): Promise<void> {
     // Skip delivery/read receipts, postbacks, and echoes of the Page's own sent messages.
     if (!senderId || !text || event.message?.is_echo) continue;
 
-    const account = await selectOne<{ user_id: string; access_token: string }>(
-      'connected_accounts', { platform: 'facebook', external_id: pageId }, 'user_id, access_token'
-    );
-    if (!account) continue;
+    const account = await getConnectedAccountByExternalId('facebook', pageId);
+    if (!account || !account.access_token) continue;
 
     let customerName = 'Facebook Customer';
     try {
@@ -1336,13 +1623,19 @@ async function handleFacebookEntry(entry: any): Promise<void> {
 
     if (owner?.facebook_auto_reply) {
       try {
-        const reply = await generateAIReply({
-          customerMessage: text,
-          customerName,
-          platform: 'facebook',
-          businessName: owner.business_name,
-        });
-        replyText = reply.suggestedReplyMyanmar || reply.suggestedReplyEnglish || null;
+        const faqMatch = await findFaqMatch(account.user_id, text);
+        if (faqMatch) {
+          replyText = faqMatch.answer;
+        } else {
+          const reply = await generateAIReply({
+            customerMessage: text,
+            customerName,
+            platform: 'facebook',
+            businessName: owner.business_name,
+            userId: account.user_id,
+          });
+          replyText = reply.suggestedReplyMyanmar || reply.suggestedReplyEnglish || null;
+        }
         if (replyText) {
           await sendFacebookMessage(account.access_token, senderId, replyText);
           status = 'replied';
@@ -1364,7 +1657,7 @@ async function handleFacebookEntry(entry: any): Promise<void> {
       created_at: new Date().toISOString(),
     });
 
-    const detected = await detectEventInMessage(text, customerName);
+    const detected = await detectEventInMessage(text, customerName, account.user_id);
     if (detected?.eventDetected && detected.eventDate) {
       await insertRow('schedule_events', {
         id: 'fb_' + randomUUID(),
@@ -1684,7 +1977,7 @@ app.post('/api/gmail/analyze', requireAuth, async (req: AuthedRequest, res) => {
     return res.json({ results: [] });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = await resolveGeminiApiKey(req.user!.id);
   if (!apiKey) {
     // Fallback so the UI still has something reasonable without a Gemini key.
     return res.json({
@@ -1712,7 +2005,7 @@ app.post('/api/gmail/analyze', requireAuth, async (req: AuthedRequest, res) => {
   }));
 
   try {
-    const ai = getGemini();
+    const ai = getGemini(apiKey);
     const today = new Date().toISOString().slice(0, 10);
     const prompt = `Today's date is ${today}. You are triaging a business owner's email inbox.
 For each email below, decide "importance" using exactly these four categories:
@@ -1808,7 +2101,7 @@ app.get('/api/calendar/detected-events', requireAuth, async (req: AuthedRequest,
     return res.status(404).json({ error: 'Gmail is not connected for this account yet.' });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = await resolveGeminiApiKey(req.user!.id);
   if (!apiKey) {
     return res.json({ events: [] });
   }
@@ -1838,7 +2131,7 @@ app.get('/api/calendar/detected-events', requireAuth, async (req: AuthedRequest,
       };
     }));
 
-    const ai = getGemini();
+    const ai = getGemini(apiKey);
     const today = new Date().toISOString().slice(0, 10);
     const prompt = `Today's date is ${today}. Scan these emails and find ONLY the ones that mention a specific, real, dated action item the recipient needs to know about or act on by that date. This includes (but isn't limited to):
 - Meetings, appointments, workshops, or sessions to attend
@@ -1946,6 +2239,47 @@ app.delete('/api/schedule/events/:id', requireAuth, async (req: AuthedRequest, r
 // Posts — persisted content with a solo-review workflow:
 // draft -> pending_review -> scheduled -> published.
 // ---------------------------------------------------------------------------
+
+// The Content Creator's attached photo arrives as a base64 data: URL (see
+// mediaPreview in ContentCreatorView.tsx). Without Cloudinary configured
+// that's stored as-is in posts.media_url, which works fine at small scale
+// but bloats the database as post volume grows. When CLOUDINARY_* is set,
+// this uploads it once at save time and swaps in the hosted https URL
+// instead — smaller rows, and Facebook can then fetch the photo straight
+// from that URL at publish time rather than us re-uploading the binary.
+async function uploadToCloudinaryIfConfigured(mediaUrl: string | null | undefined): Promise<string | null | undefined> {
+  if (!mediaUrl || !mediaUrl.startsWith('data:')) return mediaUrl;
+
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+  const apiKey = process.env.CLOUDINARY_API_KEY;
+  const apiSecret = process.env.CLOUDINARY_API_SECRET;
+  if (!cloudName || !apiKey || !apiSecret) return mediaUrl;
+
+  try {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signature = createHash('sha1').update(`timestamp=${timestamp}${apiSecret}`).digest('hex');
+    const form = new FormData();
+    form.append('file', mediaUrl);
+    form.append('api_key', apiKey);
+    form.append('timestamp', String(timestamp));
+    form.append('signature', signature);
+
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+      method: 'POST',
+      body: form,
+    });
+    const data: any = await res.json();
+    if (!res.ok || data.error) {
+      console.error('[media] Cloudinary upload failed:', data);
+      return mediaUrl; // keep the photo by falling back to the data: URL rather than dropping it
+    }
+    return data.secure_url || mediaUrl;
+  } catch (err) {
+    console.error('[media] Cloudinary upload error:', err);
+    return mediaUrl;
+  }
+}
+
 function toPostResponse(r: any) {
   return {
     id: r.id,
@@ -1958,14 +2292,167 @@ function toPostResponse(r: any) {
     status: r.status,
     tone: r.tone || undefined,
     tags: r.tags ? JSON.parse(r.tags) : undefined,
+    mediaUrl: r.media_url || undefined,
     createdAt: r.created_at,
   };
+}
+
+// Publishes a saved post's content to each of its target platforms that
+// support real publishing today — currently just a connected Facebook Page
+// (Instagram/TikTok/Telegram broadcast posting isn't wired up yet, see the
+// Instagram scopes note near FACEBOOK_SCOPES above). Shared by the manual
+// "Publish Now" action and the scheduled-post sweep below.
+// The Content Creator's "Add photo or video" attachment is stored as a
+// data: URL (base64) — see mediaPreview in ContentCreatorView.tsx. Facebook's
+// /photos endpoint wants either raw binary (multipart `source`) or a public
+// `url` it can fetch itself, so a data: URL has to be decoded into binary
+// before it can be uploaded; a plain http(s) URL (e.g. pasted in later) can
+// be passed straight through via the `url` param instead.
+function parseDataUrl(value: string): { buffer: Buffer; contentType: string } | null {
+  const match = /^data:([^;]+);base64,(.+)$/.exec(value);
+  if (!match) return null;
+  return { buffer: Buffer.from(match[2], 'base64'), contentType: match[1] };
+}
+
+async function publishPostNow(post: {
+  id: string;
+  user_id: string;
+  title: string;
+  content: string;
+  myanmar_content: string | null;
+  platforms: string;
+  media_url?: string | null;
+}): Promise<{ status: 'published' | 'failed'; results: Record<string, { ok: boolean; error?: string; externalId?: string }> }> {
+  const platforms: string[] = JSON.parse(post.platforms || '[]');
+  const message = post.myanmar_content || post.content || post.title;
+  const results: Record<string, { ok: boolean; error?: string; externalId?: string }> = {};
+
+  for (const platform of platforms) {
+    if (platform !== 'facebook') {
+      results[platform] = { ok: false, error: 'Auto-publish is not supported for this platform yet — copy the caption and post it manually.' };
+      continue;
+    }
+
+    const account = await getConnectedAccount(post.user_id, 'facebook');
+    if (!account) {
+      results.facebook = { ok: false, error: 'Facebook is not connected.' };
+      continue;
+    }
+
+    try {
+      const inlineImage = post.media_url ? parseDataUrl(post.media_url) : null;
+      let res: Response;
+
+      if (inlineImage) {
+        // Photo attached in-browser — upload the decoded binary directly.
+        const form = new FormData();
+        form.append('caption', message);
+        form.append('access_token', account.access_token!);
+        form.append('source', new Blob([new Uint8Array(inlineImage.buffer)], { type: inlineImage.contentType }), 'post-media');
+        res = await fetch(`https://graph.facebook.com/${FACEBOOK_API_VERSION}/${account.external_id}/photos`, {
+          method: 'POST',
+          body: form,
+        });
+      } else if (post.media_url) {
+        // A plain hosted URL — let Facebook fetch it directly.
+        res = await fetch(`https://graph.facebook.com/${FACEBOOK_API_VERSION}/${account.external_id}/photos`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: post.media_url, caption: message, access_token: account.access_token }),
+        });
+      } else {
+        // No media — plain text post.
+        res = await fetch(`https://graph.facebook.com/${FACEBOOK_API_VERSION}/${account.external_id}/feed`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message, access_token: account.access_token }),
+        });
+      }
+
+      const data: any = await res.json();
+      if (!res.ok || data.error) {
+        console.error('[posts] Facebook publish failed:', data);
+        results.facebook = { ok: false, error: data.error?.message || 'Facebook rejected the post.' };
+      } else {
+        results.facebook = { ok: true, externalId: data.post_id || data.id };
+      }
+    } catch (err) {
+      console.error('[posts] Facebook publish error:', err);
+      results.facebook = { ok: false, error: 'Network error while posting to Facebook.' };
+    }
+  }
+
+  const status: 'published' | 'failed' = Object.values(results).some((r) => r.ok) ? 'published' : 'failed';
+  const now = new Date().toISOString();
+  await updateRows('posts', { user_id: post.user_id, id: post.id }, { status, updated_at: now });
+
+  // One row per platform so "Facebook posted, Instagram failed" survives a
+  // page reload instead of only existing in the response of this one call.
+  await Promise.all(
+    Object.entries(results).map(([platform, r]) =>
+      upsertRow(
+        'post_targets',
+        {
+          id: `pt_${post.id}_${platform}`,
+          post_id: post.id,
+          user_id: post.user_id,
+          platform,
+          status: r.ok ? 'published' : 'failed',
+          external_post_id: r.externalId || null,
+          error_message: r.ok ? null : r.error || null,
+          published_at: r.ok ? now : null,
+          created_at: now,
+          updated_at: now,
+        },
+        ['post_id', 'platform']
+      )
+    )
+  );
+
+  return { status, results };
+}
+
+// Sweeps for posts whose scheduled time has arrived and auto-publishes them.
+// Only meaningful under a persistent process (local `npm start` via
+// server.ts) — a Vercel serverless function has no background timer, so
+// scheduled posts there still need the manual "Publish Now" action or a
+// Vercel Cron job hitting a dedicated endpoint.
+export async function publishDuePosts(): Promise<void> {
+  try {
+    const due = await selectMany<{
+      id: string; user_id: string; title: string; content: string; myanmar_content: string | null;
+      platforms: string; scheduled_date: string | null; scheduled_time: string | null; media_url: string | null;
+    }>('posts', { status: 'scheduled' });
+    const now = Date.now();
+    for (const post of due) {
+      if (!post.scheduled_date) continue;
+      const due_at = new Date(`${post.scheduled_date}T${post.scheduled_time || '00:00'}:00`).getTime();
+      if (Number.isNaN(due_at) || due_at > now) continue;
+      await publishPostNow(post);
+    }
+  } catch (err) {
+    console.error('[posts] scheduled publish sweep failed:', err);
+  }
 }
 
 app.get('/api/posts', requireAuth, async (req: AuthedRequest, res) => {
   try {
     const data = await selectMany('posts', { user_id: req.user!.id }, { orderBy: 'created_at', ascending: false });
-    return res.json({ posts: (data || []).map(toPostResponse) });
+    const targetRows = await selectMany<{ post_id: string; platform: string; status: string; error_message: string | null; external_post_id: string | null }>(
+      'post_targets', { user_id: req.user!.id }
+    );
+    const targetsByPost: Record<string, { platform: string; status: string; error?: string; externalId?: string }[]> = {};
+    for (const t of targetRows) {
+      (targetsByPost[t.post_id] ??= []).push({
+        platform: t.platform,
+        status: t.status,
+        error: t.error_message || undefined,
+        externalId: t.external_post_id || undefined,
+      });
+    }
+    return res.json({
+      posts: (data || []).map((r) => ({ ...toPostResponse(r), targets: targetsByPost[r.id] || [] })),
+    });
   } catch (err) {
     console.error('[posts] list error:', err);
     return res.status(500).json({ error: 'Could not load your posts.' });
@@ -1973,13 +2460,14 @@ app.get('/api/posts', requireAuth, async (req: AuthedRequest, res) => {
 });
 
 app.post('/api/posts', requireAuth, async (req: AuthedRequest, res) => {
-  const { title, content, myanmarContent, platforms, status, tone, tags } = req.body;
+  const { title, content, myanmarContent, platforms, status, tone, tags, mediaUrl } = req.body;
   if (!title || !String(title).trim()) return res.status(400).json({ error: 'title is required.' });
   if (!Array.isArray(platforms) || platforms.length === 0) return res.status(400).json({ error: 'At least one platform is required.' });
 
   const id = 'post_' + randomUUID();
   const now = new Date().toISOString();
   try {
+    const storedMediaUrl = await uploadToCloudinaryIfConfigured(mediaUrl);
     await insertRow('posts', {
       id,
       user_id: req.user!.id,
@@ -1990,6 +2478,7 @@ app.post('/api/posts', requireAuth, async (req: AuthedRequest, res) => {
       status: status === 'pending_review' ? 'pending_review' : 'draft',
       tone: tone || null,
       tags: tags ? JSON.stringify(tags) : null,
+      media_url: storedMediaUrl || null,
       created_at: now,
       updated_at: now,
     });
@@ -2001,7 +2490,7 @@ app.post('/api/posts', requireAuth, async (req: AuthedRequest, res) => {
 });
 
 app.patch('/api/posts/:id', requireAuth, async (req: AuthedRequest, res) => {
-  const { title, content, myanmarContent, status, scheduledDate, scheduledTime } = req.body;
+  const { title, content, myanmarContent, status, scheduledDate, scheduledTime, mediaUrl } = req.body;
   const patch: Record<string, any> = { updated_at: new Date().toISOString() };
   if (title !== undefined) patch.title = title;
   if (content !== undefined) patch.content = content;
@@ -2011,11 +2500,25 @@ app.patch('/api/posts/:id', requireAuth, async (req: AuthedRequest, res) => {
   if (scheduledTime !== undefined) patch.scheduled_time = scheduledTime;
 
   try {
+    if (mediaUrl !== undefined) patch.media_url = await uploadToCloudinaryIfConfigured(mediaUrl);
     await updateRows('posts', { user_id: req.user!.id, id: req.params.id }, patch);
     return res.json({ success: true });
   } catch (err) {
     console.error('[posts] update error:', err);
     return res.status(500).json({ error: 'Could not update this post.' });
+  }
+});
+
+app.post('/api/posts/:id/publish', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const post = await selectOne<any>('posts', { user_id: req.user!.id, id: req.params.id });
+    if (!post) return res.status(404).json({ error: 'Post not found.' });
+
+    const { status, results } = await publishPostNow(post);
+    return res.json({ success: status === 'published', status, results });
+  } catch (err) {
+    console.error('[posts] publish error:', err);
+    return res.status(500).json({ error: 'Could not publish this post.' });
   }
 });
 
@@ -2081,27 +2584,48 @@ app.post('/api/messages/:id/reply', requireAuth, async (req: AuthedRequest, res)
   }
 });
 
-// AI Post Generation Endpoint
-app.post('/api/ai/generate-post', async (req, res) => {
+// AI Post Generation Endpoint — topic text is optional as long as a product
+// photo is attached (imageBase64, the same data: URL the Content Creator
+// already keeps in mediaPreview): Gemini looks at the photo itself and
+// writes the caption from what it sees, using any topic text as extra
+// context (price, promo, delivery terms) rather than the sole source.
+// requireAuth so an unauthenticated caller can't spend the account's Gemini
+// quota for free — this endpoint makes a real API call per request.
+app.post('/api/ai/generate-post', requireAuth, async (req: AuthedRequest, res) => {
   try {
-    const { topic, tone, platforms, businessType, language } = req.body;
-    const apiKey = process.env.GEMINI_API_KEY;
+    const { topic, tone, platforms, businessType, imageBase64 } = req.body;
+    const apiKey = await resolveGeminiApiKey(req.user!.id);
+    const hasTopic = !!(topic && String(topic).trim());
+
+    const imageMatch = typeof imageBase64 === 'string' ? /^data:([^;]+);base64,(.+)$/.exec(imageBase64) : null;
+    const imagePart = imageMatch ? { inlineData: { mimeType: imageMatch[1], data: imageMatch[2] } } : null;
 
     if (!apiKey) {
       // High-quality fallback if API key is not configured
       return res.json({
-        title: `✨ ${topic || 'Special Promotion'}`,
-        myanmarContent: `ချစ်စရာကောင်းတဲ့ customer များအတွက် ${topic || 'အထူးပရိုမိုးရှင်း'} အစီအစဉ်လေး စတင်ပါပြီရှင်။ လက်လွတ်မခံဘဲ အခုပဲ page messenger ကနေ order တင်လိုက်ပါနော်။ KPay / WavePay ဖြင့် အဆင်ပြေစွာ ပေးချေနိုင်ပါသည်။ 💖`,
-        content: `Exciting announcement for our beloved customers regarding ${topic || 'special updates'}! Premium quality guaranteed with fast delivery. Message us now to place your order!`,
+        title: `✨ ${hasTopic ? topic : 'Special Promotion'}`,
+        myanmarContent: `ချစ်စရာကောင်းတဲ့ customer များအတွက် ${hasTopic ? topic : 'အထူးပရိုမိုးရှင်း'} အစီအစဉ်လေး စတင်ပါပြီရှင်။ လက်လွတ်မခံဘဲ အခုပဲ page messenger ကနေ order တင်လိုက်ပါနော်။ KPay / WavePay ဖြင့် အဆင်ပြေစွာ ပေးချေနိုင်ပါသည်။ 💖`,
+        content: `Exciting announcement for our beloved customers regarding ${hasTopic ? topic : 'special updates'}! Premium quality guaranteed with fast delivery. Message us now to place your order!`,
         tags: ['#PinkkuMM', '#MyanmarBusiness', '#ShopOnlineYangon', '#SpecialOffer'],
         tone: tone || 'Friendly & Engaging'
       });
     }
 
-    const ai = getGemini();
+    if (!hasTopic && !imagePart) {
+      return res.status(400).json({ error: 'Describe the product, or attach a photo, before generating.' });
+    }
+
+    const ai = getGemini(apiKey);
+    const topicLine = hasTopic
+      ? `Topic / Product: "${topic}"`
+      : 'Topic / Product: not described in words — look at the attached product photo and write the post from what you actually see in it (type of item, color, style). Do not invent details the photo does not show.';
+    const photoNote = imagePart && hasTopic
+      ? '\nA product photo is also attached — use it to ground the visual details (color, style) of your description alongside the topic text above.'
+      : '';
+
     const prompt = `You are a social media marketing copywriter specializing in Myanmar (Burma) e-commerce & retail.
 Create an engaging promotional post for a business of type "${businessType || 'General Retail'}".
-Topic / Product: "${topic}"
+${topicLine}${photoNote}
 Tone: "${tone || 'Excited & Friendly'}"
 Target Platforms: ${(platforms || ['Facebook', 'Instagram', 'TikTok', 'Telegram']).join(', ')}
 
@@ -2116,7 +2640,7 @@ Output strictly valid JSON only.`;
 
     const response = await generateContentWithRetry(ai, {
       model: 'gemini-flash-lite-latest',
-      contents: prompt,
+      contents: imagePart ? [{ role: 'user', parts: [{ text: prompt }, imagePart] }] : prompt,
       config: {
         responseMimeType: 'application/json'
       }
@@ -2141,13 +2665,14 @@ interface GenerateReplyParams {
   platform?: string;
   businessName?: string;
   senderName?: string;
+  userId?: string;
 }
 
 // Shared by the manual "AI Drafted Response" endpoint and the Telegram
 // auto-reply poller, so both produce the exact same kind of reply.
 async function generateAIReply(params: GenerateReplyParams): Promise<any> {
-  const { customerMessage, customerName, platform, businessName, senderName } = params;
-  const apiKey = process.env.GEMINI_API_KEY;
+  const { customerMessage, customerName, platform, businessName, senderName, userId } = params;
+  const apiKey = await resolveGeminiApiKey(userId);
   const signOffName = senderName || businessName || 'Pinkku';
   const isEmail = (platform || '').toLowerCase() === 'gmail';
 
@@ -2167,7 +2692,7 @@ async function generateAIReply(params: GenerateReplyParams): Promise<any> {
     return fallbackReply();
   }
 
-  const ai = getGemini();
+  const ai = getGemini(apiKey);
   const prompt = isEmail
     ? `You are writing a professional business email reply on behalf of "${signOffName}" at "${businessName || 'Pinkku'}".
 Recipient Name: ${customerName || 'Valued Customer'}
@@ -2238,9 +2763,23 @@ function stripWelcomeOpener(text: string | undefined): string | undefined {
   return sentences.join(' ').trim();
 }
 
-app.post('/api/ai/generate-reply', async (req, res) => {
+// requireAuth here isn't just access control — this endpoint spends a real
+// Gemini API call per request, so leaving it open let anyone who found the
+// URL burn through the account's quota for free. It also lets the handler
+// check the caller's own FAQ list before spending that call at all.
+app.post('/api/ai/generate-reply', requireAuth, async (req: AuthedRequest, res) => {
   try {
-    const parsed = await generateAIReply(req.body);
+    const faqMatch = req.body?.customerMessage ? await findFaqMatch(req.user!.id, req.body.customerMessage) : null;
+    if (faqMatch) {
+      return res.json({
+        suggestedReplyMyanmar: faqMatch.answer,
+        suggestedReplyEnglish: faqMatch.answer,
+        sentiment: 'neutral',
+        orderIntent: false,
+        source: 'faq',
+      });
+    }
+    const parsed = await generateAIReply({ ...req.body, userId: req.user!.id });
     return res.json(parsed);
   } catch (error: any) {
     console.error('Gemini reply generation error:', error);

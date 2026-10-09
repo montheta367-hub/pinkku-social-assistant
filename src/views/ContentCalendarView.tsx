@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { SocialPost, PlatformType } from '../types';
 import { PlatformLogo } from '../components/PlatformLogo';
-import { Calendar, Plus, ChevronLeft, ChevronRight, Mail, CalendarPlus, CalendarCheck, FileText, ClipboardCheck, Trash2, Undo2, Check } from 'lucide-react';
+import { Calendar, Plus, ChevronLeft, ChevronRight, Mail, CalendarPlus, CalendarCheck, FileText, ClipboardCheck, Trash2, Undo2, Check, Send, Loader2 } from 'lucide-react';
 
 interface ContentCalendarViewProps {
   posts: SocialPost[];
   onCreatePost: () => void;
   onSubmitForReview: (id: string) => void;
   onApprovePost: (id: string, date: string, time: string) => void;
+  onPublishNow: (id: string) => Promise<{ success: boolean; results?: Record<string, { ok: boolean; error?: string }> }>;
   onRequestChanges: (id: string) => void;
   onDeleteDraft: (id: string) => void;
 }
@@ -62,7 +63,7 @@ function weekOffsetForDate(iso: string): number {
 }
 
 export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
-  posts, onCreatePost, onSubmitForReview, onApprovePost, onRequestChanges, onDeleteDraft
+  posts, onCreatePost, onSubmitForReview, onApprovePost, onPublishNow, onRequestChanges, onDeleteDraft
 }) => {
   const [filterPlatform, setFilterPlatform] = useState<string>("all");
   const [weekOffset, setWeekOffset] = useState(0);
@@ -71,6 +72,19 @@ export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
   const [addedEventIds, setAddedEventIds] = useState<Set<string>>(new Set());
   const [addingEventId, setAddingEventId] = useState<string | null>(null);
   const [reviewSchedule, setReviewSchedule] = useState<Record<string, { date: string; time: string }>>({});
+  const [publishingId, setPublishingId] = useState<string | null>(null);
+  const [publishOutcome, setPublishOutcome] = useState<Record<string, { success: boolean; message: string }>>({});
+
+  const handlePublishNow = async (id: string) => {
+    setPublishingId(id);
+    setPublishOutcome(prev => ({ ...prev, [id]: undefined as any }));
+    const { success, results } = await onPublishNow(id);
+    const message = results
+      ? Object.entries(results).map(([platform, r]) => `${platform}: ${r.ok ? 'posted' : r.error || 'failed'}`).join(' · ')
+      : (success ? 'Posted.' : 'Could not publish — please try again.');
+    setPublishOutcome(prev => ({ ...prev, [id]: { success, message } }));
+    setPublishingId(null);
+  };
 
   const draftPosts = posts.filter(p => p.status === 'draft');
   const pendingReviewPosts = posts.filter(p => p.status === 'pending_review');
@@ -216,6 +230,18 @@ export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
                       <Check className="w-3.5 h-3.5" /> Approve &amp; Schedule
                     </button>
                     <button
+                      onClick={() => handlePublishNow(post.id)}
+                      disabled={publishingId === post.id}
+                      className="px-3 py-1.5 rounded-lg bg-[#FF2D85] hover:opacity-90 text-white text-[11px] font-bold flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {publishingId === post.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Send className="w-3.5 h-3.5" />
+                      )}
+                      Publish Now
+                    </button>
+                    <button
                       onClick={() => onRequestChanges(post.id)}
                       className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 text-[11px] font-bold flex items-center gap-1.5"
                     >
@@ -229,6 +255,11 @@ export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
+                  {publishOutcome[post.id] && (
+                    <p className={`text-[11px] font-bold ${publishOutcome[post.id].success ? 'text-emerald-700' : 'text-rose-600'}`}>
+                      {publishOutcome[post.id].success ? '✓ ' : '✗ '}{publishOutcome[post.id].message}
+                    </p>
+                  )}
                 </div>
               );
             })}
@@ -409,10 +440,24 @@ export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
                     className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/70 hover:border-pink-300 transition-all space-y-1.5"
                   >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1">
-                        {post.platforms.map(p => (
-                          <PlatformLogo key={p} platform={p} className="w-3 h-3" />
-                        ))}
+                      <div className="flex items-center gap-1.5">
+                        {post.platforms.map(p => {
+                          const target = post.targets?.find(t => t.platform === p);
+                          const ring = target?.status === 'published'
+                            ? 'ring-2 ring-emerald-400'
+                            : target?.status === 'failed'
+                              ? 'ring-2 ring-rose-400'
+                              : '';
+                          return (
+                            <span
+                              key={p}
+                              className={`inline-flex rounded-full ${ring}`}
+                              title={target?.status === 'failed' ? target.error : target?.status === 'published' ? `${p}: published` : undefined}
+                            >
+                              <PlatformLogo platform={p} className="w-3 h-3" />
+                            </span>
+                          );
+                        })}
                       </div>
                       <span className="text-[9px] font-black text-slate-500">
                         {post.scheduledTime || "12:00"}
@@ -424,7 +469,9 @@ export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
                     </p>
 
                     <span className={`inline-block text-[9px] font-black px-1.5 py-0.2 rounded-md ${
-                      post.status === 'published' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
+                      post.status === 'published' ? 'bg-emerald-100 text-emerald-800' :
+                      post.status === 'failed' ? 'bg-rose-100 text-rose-700' :
+                      'bg-blue-100 text-blue-800'
                     }`}>
                       {post.status}
                     </span>

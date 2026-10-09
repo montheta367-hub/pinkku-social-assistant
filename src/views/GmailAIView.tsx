@@ -249,7 +249,7 @@ export const GmailAIView: React.FC<GmailAIViewProps> = ({ user, onSelectTab, onD
     setIsDisconnecting(false);
     setShowDisconnectConfirm(false);
     onDisconnected();
-    onSelectTab('connections');
+    onSelectTab('creator');
   };
 
   useEffect(() => {
@@ -329,13 +329,13 @@ export const GmailAIView: React.FC<GmailAIViewProps> = ({ user, onSelectTab, onD
         </div>
         <h2 className="text-lg font-black text-slate-900">Connect Gmail to see your inbox here</h2>
         <p className="text-xs text-slate-500 font-medium">
-          This view reads your real Gmail messages and drafts AI replies — connect your Google account first from the Connections tab.
+          This view reads your real Gmail messages and drafts AI replies — connect your Google account first from Publish &gt; Connect accounts.
         </p>
         <button
-          onClick={() => onSelectTab('connections')}
+          onClick={() => onSelectTab('creator')}
           className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-[#FF2D85] text-white font-extrabold text-xs shadow-md shadow-pink-500/25"
         >
-          Go to Connections
+          Go to Publish
         </button>
       </div>
     );
