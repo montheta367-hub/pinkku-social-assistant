@@ -22,3 +22,9 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS facebook_auto_reply BOOLEAN NOT NULL 
 -- TikTok tips, Gmail triage — uses their own key and quota instead of the
 -- shared GEMINI_API_KEY the app owner pays for.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS gemini_api_key TEXT;
+
+-- The user's own Telegram broadcast channel (e.g. "@shopname" or a numeric
+-- chat id) that Pinkku's shared bot has been made an admin of, so posts can
+-- be auto-published there — distinct from telegram_contacts/telegram_groups,
+-- which are about customer DMs, not the business's own channel.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_channel_id TEXT;

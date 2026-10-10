@@ -1226,6 +1226,30 @@ app.patch('/api/settings/telegram-auto-reply', requireAuth, async (req: AuthedRe
   return res.json({ success: true, enabled: !!enabled });
 });
 
+// The business's own Telegram broadcast channel (distinct from the shared
+// bot's customer-DM link) — set once the owner has made @PinkkuBot an admin
+// of their channel with "Post Messages" rights, so publishPostNow can post
+// there. Accepts "@channelname" or a numeric chat id.
+app.get('/api/settings/telegram-channel', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const data = await selectOne<{ telegram_channel_id: string | null }>('users', { id: req.user!.id }, 'telegram_channel_id');
+    return res.json({ channelId: data?.telegram_channel_id || null });
+  } catch {
+    return res.status(500).json({ error: 'Could not load this setting.' });
+  }
+});
+
+app.patch('/api/settings/telegram-channel', requireAuth, async (req: AuthedRequest, res) => {
+  const { channelId } = req.body;
+  const trimmed = typeof channelId === 'string' ? channelId.trim() : null;
+  try {
+    await updateRows('users', { id: req.user!.id }, { telegram_channel_id: trimmed || null });
+  } catch {
+    return res.status(500).json({ error: 'Could not save this setting.' });
+  }
+  return res.json({ success: true, channelId: trimmed || null });
+});
+
 // Same idea, for incoming Facebook Messenger DMs to a connected Page.
 app.get('/api/settings/facebook-auto-reply', requireAuth, async (req: AuthedRequest, res) => {
   try {
@@ -1349,6 +1373,50 @@ function sendTelegramMessage(botToken: string, chatId: string | number, text: st
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: chatId, text }),
   }).catch(() => {});
+}
+
+// Like sendTelegramMessage, but reports success/failure instead of swallowing
+// errors — used by publishPostNow, where the caller needs to know whether the
+// broadcast actually went out.
+async function sendTelegramBroadcast(
+  botToken: string,
+  chatId: string,
+  caption: string,
+  mediaUrl?: string | null
+): Promise<{ ok: boolean; error?: string; messageId?: number }> {
+  try {
+    const inlineImage = mediaUrl ? parseDataUrl(mediaUrl) : null;
+    let res: Response;
+
+    if (inlineImage) {
+      const form = new FormData();
+      form.append('chat_id', chatId);
+      form.append('caption', caption);
+      form.append('photo', new Blob([new Uint8Array(inlineImage.buffer)], { type: inlineImage.contentType }), 'post-media');
+      res = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, { method: 'POST', body: form });
+    } else if (mediaUrl) {
+      res = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, photo: mediaUrl, caption }),
+      });
+    } else {
+      res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: caption }),
+      });
+    }
+
+    const data: any = await res.json();
+    if (!data.ok) {
+      return { ok: false, error: data.description || 'Telegram rejected the post.' };
+    }
+    return { ok: true, messageId: data.result?.message_id };
+  } catch (err) {
+    console.error('[telegram] broadcast error:', err);
+    return { ok: false, error: 'Network error while posting to Telegram.' };
+  }
 }
 
 // Scans a single Telegram customer message for a task/event/deadline —
@@ -2298,10 +2366,11 @@ function toPostResponse(r: any) {
 }
 
 // Publishes a saved post's content to each of its target platforms that
-// support real publishing today — currently just a connected Facebook Page
-// (Instagram/TikTok/Telegram broadcast posting isn't wired up yet, see the
-// Instagram scopes note near FACEBOOK_SCOPES above). Shared by the manual
-// "Publish Now" action and the scheduled-post sweep below.
+// support real publishing today — a connected Facebook Page, and the
+// business's own Telegram broadcast channel if one is set (see
+// telegram_channel_id above). Instagram/TikTok broadcast posting isn't wired
+// up yet, see the Instagram scopes note near FACEBOOK_SCOPES above. Shared by
+// the manual "Publish Now" action and the scheduled-post sweep below.
 // The Content Creator's "Add photo or video" attachment is stored as a
 // data: URL (base64) — see mediaPreview in ContentCreatorView.tsx. Facebook's
 // /photos endpoint wants either raw binary (multipart `source`) or a public
@@ -2328,6 +2397,20 @@ async function publishPostNow(post: {
   const results: Record<string, { ok: boolean; error?: string; externalId?: string }> = {};
 
   for (const platform of platforms) {
+    if (platform === 'telegram') {
+      const botToken = process.env.TELEGRAM_BOT_TOKEN;
+      const channel = await selectOne<{ telegram_channel_id: string | null }>('users', { id: post.user_id }, 'telegram_channel_id');
+      if (!botToken || !channel?.telegram_channel_id) {
+        results.telegram = { ok: false, error: 'No Telegram channel connected — add one in Settings.' };
+        continue;
+      }
+      const outcome = await sendTelegramBroadcast(botToken, channel.telegram_channel_id, message, post.media_url);
+      results.telegram = outcome.ok
+        ? { ok: true, externalId: String(outcome.messageId) }
+        : { ok: false, error: outcome.error };
+      continue;
+    }
+
     if (platform !== 'facebook') {
       results[platform] = { ok: false, error: 'Auto-publish is not supported for this platform yet — copy the caption and post it manually.' };
       continue;

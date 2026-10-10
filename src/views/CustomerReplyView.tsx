@@ -54,6 +54,10 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
   const [newFaq, setNewFaq] = useState({ question: '', keywords: '', answer: '' });
   const [faqSaving, setFaqSaving] = useState(false);
   const [faqError, setFaqError] = useState('');
+  const [telegramChannel, setTelegramChannel] = useState('');
+  const [telegramChannelInput, setTelegramChannelInput] = useState('');
+  const [telegramChannelSaving, setTelegramChannelSaving] = useState(false);
+  const [telegramChannelSaved, setTelegramChannelSaved] = useState(false);
 
   const loadFaqs = async () => {
     const token = localStorage.getItem('pinkku_token');
@@ -83,6 +87,15 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
     fetch('/api/settings/facebook-auto-reply', { headers: { Authorization: `Bearer ${token}` } })
       .then(res => (res.ok ? res.json() : null))
       .then(data => { if (data) setFacebookAutoReply(!!data.enabled); })
+      .catch(() => {});
+    fetch('/api/settings/telegram-channel', { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (data?.channelId) {
+          setTelegramChannel(data.channelId);
+          setTelegramChannelInput(data.channelId);
+        }
+      })
       .catch(() => {});
     loadFaqs();
   }, []);
@@ -161,6 +174,29 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
       setFacebookAutoReply(!next);
     } finally {
       setFacebookAutoReplyLoading(false);
+    }
+  };
+
+  const handleSaveTelegramChannel = async () => {
+    setTelegramChannelSaving(true);
+    setTelegramChannelSaved(false);
+    const token = localStorage.getItem('pinkku_token');
+    try {
+      const res = await fetch('/api/settings/telegram-channel', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ channelId: telegramChannelInput.trim() }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTelegramChannel(data.channelId || '');
+        setTelegramChannelSaved(true);
+        setTimeout(() => setTelegramChannelSaved(false), 2000);
+      }
+    } catch {
+      // Input stays editable so the user can just retry.
+    } finally {
+      setTelegramChannelSaving(false);
     }
   };
 
@@ -268,6 +304,36 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
           </button>
         </div>
       )}
+
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-3.5 space-y-2.5">
+        <div>
+          <p className="text-xs font-black text-slate-900">Telegram Broadcast Channel</p>
+          <p className="text-[11px] text-slate-500 font-medium">
+            Make @PinkkuAssistantBot an admin of your channel (with "Post Messages" rights), then paste its username here so AI-generated posts can auto-publish there.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={telegramChannelInput}
+            onChange={(e) => setTelegramChannelInput(e.target.value)}
+            placeholder="@yourchannel"
+            className="flex-1 px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 focus:bg-white text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-sky-500"
+          />
+          <button
+            onClick={handleSaveTelegramChannel}
+            disabled={telegramChannelSaving || !telegramChannelInput.trim()}
+            className="px-3.5 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[11px] font-bold disabled:opacity-50 shrink-0"
+          >
+            {telegramChannelSaving ? 'Saving…' : telegramChannelSaved ? 'Saved!' : 'Save'}
+          </button>
+        </div>
+        {telegramChannel && (
+          <p className="text-[11px] font-bold text-emerald-600 flex items-center gap-1">
+            <Check className="w-3.5 h-3.5" /> Connected: {telegramChannel}
+          </p>
+        )}
+      </div>
 
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-3.5 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
