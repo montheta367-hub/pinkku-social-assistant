@@ -1449,6 +1449,53 @@ Output strictly a JSON object: { "eventDetected": boolean, "eventTitle": string|
   }
 }
 
+// A real order usually comes out over several messages ("I want glasses" →
+// "here's my address" → "here's my phone"), and detectOrderInMessage fires
+// on each one — so this merges into the customer's one still-open ("new")
+// order row instead of creating a new row per message, filling in whichever
+// fields this message added and leaving the rest as they were. Once an order
+// is marked 'fulfilled' it's left alone and the next detected message for
+// that same chat starts a fresh row (a repeat order).
+async function upsertOrderFromMessage(
+  userId: string,
+  platform: string,
+  chatId: string,
+  order: { customerName?: string | null; phone?: string | null; address?: string | null; productNote?: string | null },
+  fallbackCustomerName: string,
+  sourceMessage: string
+): Promise<void> {
+  const existing = await selectOne<{ id: string; customer_name: string | null; phone: string | null; address: string | null; product_note: string | null }>(
+    'orders',
+    { user_id: userId, customer_chat_id: chatId, status: 'new' },
+    'id, customer_name, phone, address, product_note'
+  );
+
+  if (existing) {
+    await updateRows('orders', { id: existing.id }, {
+      customer_name: order.customerName || existing.customer_name,
+      phone: order.phone || existing.phone,
+      address: order.address || existing.address,
+      product_note: order.productNote || existing.product_note,
+      source_message: sourceMessage,
+    });
+    return;
+  }
+
+  await insertRow('orders', {
+    id: 'ord_' + randomUUID(),
+    user_id: userId,
+    platform,
+    customer_chat_id: chatId,
+    customer_name: order.customerName || fallbackCustomerName,
+    phone: order.phone || null,
+    address: order.address || null,
+    product_note: order.productNote || null,
+    source_message: sourceMessage,
+    status: 'new',
+    created_at: new Date().toISOString(),
+  });
+}
+
 // Scans a single customer message for order-fulfillment details (name,
 // phone, address) so the business owner doesn't have to dig through chat
 // history to find them — saved to the orders table by the caller. Mirrors
@@ -1656,19 +1703,7 @@ async function handleTelegramUpdate(update: any): Promise<void> {
 
   const order = await detectOrderInMessage(text, finalCustomerName, contact.owner_user_id);
   if (order?.orderDetected && (order.phone || order.address)) {
-    await insertRow('orders', {
-      id: 'ord_' + randomUUID(),
-      user_id: contact.owner_user_id,
-      platform: 'telegram',
-      customer_chat_id: chatId,
-      customer_name: order.customerName || finalCustomerName,
-      phone: order.phone || null,
-      address: order.address || null,
-      product_note: order.productNote || null,
-      source_message: text.slice(0, 500),
-      status: 'new',
-      created_at: new Date().toISOString(),
-    });
+    await upsertOrderFromMessage(contact.owner_user_id, 'telegram', chatId, order, finalCustomerName, text.slice(0, 500));
   }
 }
 
@@ -1789,19 +1824,7 @@ async function handleFacebookEntry(entry: any): Promise<void> {
 
     const order = await detectOrderInMessage(text, customerName, account.user_id);
     if (order?.orderDetected && (order.phone || order.address)) {
-      await insertRow('orders', {
-        id: 'ord_' + randomUUID(),
-        user_id: account.user_id,
-        platform: 'facebook',
-        customer_chat_id: senderId,
-        customer_name: order.customerName || customerName,
-        phone: order.phone || null,
-        address: order.address || null,
-        product_note: order.productNote || null,
-        source_message: text.slice(0, 500),
-        status: 'new',
-        created_at: new Date().toISOString(),
-      });
+      await upsertOrderFromMessage(account.user_id, 'facebook', senderId, order, customerName, text.slice(0, 500));
     }
   }
 }
