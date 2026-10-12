@@ -4,7 +4,7 @@ import rateLimit from 'express-rate-limit';
 import { GoogleGenAI } from '@google/genai';
 import { OAuth2Client } from 'google-auth-library';
 import { Resend } from 'resend';
-import { selectOne, selectMany, insertRow, updateRows, upsertRow, deleteRows } from './db.js';
+import { selectOne, selectMany, insertRow, updateRows, upsertRow, deleteRows, pool } from './db.js';
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash, createCipheriv, createDecipheriv } from 'node:crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -2737,6 +2737,81 @@ app.patch('/api/orders/:id', requireAuth, async (req: AuthedRequest, res) => {
   } catch (err) {
     console.error('[orders] update error:', err);
     return res.status(500).json({ error: 'Could not update this order.' });
+  }
+});
+
+// Report — real counts pulled straight from this account's own data (posts,
+// customer messages, orders), rather than placeholder follower/reach numbers
+// we have no real source for (that needs each platform's own Insights API,
+// which needs Advanced Access we don't have yet — see the Facebook
+// Business Verification notes elsewhere in this file).
+// ---------------------------------------------------------------------------
+app.get('/api/report/summary', requireAuth, async (req: AuthedRequest, res) => {
+  const userId = req.user!.id;
+  try {
+    const [postTargets, messages, orders, postsByPlatform] = await Promise.all([
+      pool.query(
+        `SELECT status, COUNT(*)::int AS count FROM post_targets WHERE user_id = $1 GROUP BY status`,
+        [userId]
+      ),
+      pool.query(
+        `SELECT
+           COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE status = 'replied')::int AS replied,
+           COUNT(*) FILTER (WHERE platform = 'telegram')::int AS telegram,
+           COUNT(*) FILTER (WHERE platform = 'facebook')::int AS facebook
+         FROM customer_messages WHERE user_id = $1`,
+        [userId]
+      ),
+      pool.query(
+        `SELECT
+           COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE status = 'fulfilled')::int AS fulfilled
+         FROM orders WHERE user_id = $1`,
+        [userId]
+      ),
+      pool.query(
+        `SELECT platform, status, COUNT(*)::int AS count FROM post_targets WHERE user_id = $1 GROUP BY platform, status`,
+        [userId]
+      ),
+    ]);
+
+    const targetsByStatus: Record<string, number> = {};
+    for (const row of postTargets.rows) targetsByStatus[row.status] = row.count;
+
+    const platformBreakdown: Record<string, { published: number; failed: number; pending: number }> = {};
+    for (const row of postsByPlatform.rows) {
+      if (!platformBreakdown[row.platform]) platformBreakdown[row.platform] = { published: 0, failed: 0, pending: 0 };
+      if (row.status === 'published') platformBreakdown[row.platform].published = row.count;
+      else if (row.status === 'failed') platformBreakdown[row.platform].failed = row.count;
+      else platformBreakdown[row.platform].pending += row.count;
+    }
+
+    const msgRow = messages.rows[0] || { total: 0, replied: 0, telegram: 0, facebook: 0 };
+    const orderRow = orders.rows[0] || { total: 0, fulfilled: 0 };
+
+    return res.json({
+      posts: {
+        published: targetsByStatus.published || 0,
+        failed: targetsByStatus.failed || 0,
+        pending: targetsByStatus.pending || 0,
+        byPlatform: platformBreakdown,
+      },
+      messages: {
+        total: msgRow.total,
+        replied: msgRow.replied,
+        replyRate: msgRow.total > 0 ? Math.round((msgRow.replied / msgRow.total) * 100) : 0,
+        byPlatform: { telegram: msgRow.telegram, facebook: msgRow.facebook },
+      },
+      orders: {
+        total: orderRow.total,
+        fulfilled: orderRow.fulfilled,
+        new: orderRow.total - orderRow.fulfilled,
+      },
+    });
+  } catch (err) {
+    console.error('[report] summary error:', err);
+    return res.status(500).json({ error: 'Could not load report data.' });
   }
 });
 
