@@ -16,7 +16,10 @@ import {
   Zap,
   HelpCircle,
   Plus,
-  Trash2
+  Trash2,
+  Package,
+  Phone,
+  MapPin
 } from 'lucide-react';
 
 interface CustomerReplyViewProps {
@@ -30,6 +33,18 @@ interface FaqEntry {
   question: string;
   keywords: string;
   answer: string;
+}
+
+interface OrderEntry {
+  id: string;
+  platform: string;
+  customer_name: string | null;
+  phone: string | null;
+  address: string | null;
+  product_note: string | null;
+  source_message: string | null;
+  status: string;
+  created_at: string;
 }
 
 const FAQ_MAX_ENTRIES = 6;
@@ -58,6 +73,39 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
   const [telegramChannelInput, setTelegramChannelInput] = useState('');
   const [telegramChannelSaving, setTelegramChannelSaving] = useState(false);
   const [telegramChannelSaved, setTelegramChannelSaved] = useState(false);
+  const [orders, setOrders] = useState<OrderEntry[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+
+  const loadOrders = async () => {
+    const token = localStorage.getItem('pinkku_token');
+    if (!token) return;
+    setOrdersLoading(true);
+    try {
+      const res = await fetch('/api/orders', { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setOrders(data.orders || []);
+      }
+    } catch {
+      // Leave the list as-is — the panel stays usable to retry.
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+
+  const handleMarkOrderFulfilled = async (id: string) => {
+    setOrders(prev => prev.map(o => (o.id === id ? { ...o, status: 'fulfilled' } : o)));
+    const token = localStorage.getItem('pinkku_token');
+    try {
+      await fetch(`/api/orders/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: 'fulfilled' }),
+      });
+    } catch {
+      loadOrders();
+    }
+  };
 
   const loadFaqs = async () => {
     const token = localStorage.getItem('pinkku_token');
@@ -98,6 +146,7 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
       })
       .catch(() => {});
     loadFaqs();
+    loadOrders();
   }, []);
 
   const handleAddFaq = async () => {
@@ -431,6 +480,54 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
           <p className="text-[11px] text-slate-400 font-medium">Limit reached — delete one above to add another.</p>
         )}
       </div>
+
+      {/* Orders — fulfillment details (phone/address) the AI pulled out of a
+          customer chat, so they don't have to be dug out of message history. */}
+      {orders.length > 0 && (
+        <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200/80 shadow-sm space-y-3">
+          <div className="flex items-center gap-2">
+            <Package className="w-4 h-4 text-emerald-600" />
+            <span className="text-xs font-black text-slate-800">Orders ({orders.filter(o => o.status === 'new').length} new)</span>
+            <span className="text-[11px] text-slate-400 font-medium">— auto-captured from chat, no typing needed</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {orders.map(order => (
+              <div
+                key={order.id}
+                className={`p-3.5 rounded-2xl border space-y-2 ${order.status === 'fulfilled' ? 'bg-slate-50/70 border-slate-200/70 opacity-60' : 'bg-emerald-50/50 border-emerald-200/70'}`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <PlatformLogo platform={order.platform} className="w-3.5 h-3.5 shrink-0" />
+                    <span className="text-xs font-black text-slate-900 truncate">{order.customer_name || 'Customer'}</span>
+                  </div>
+                  {order.status !== 'fulfilled' && (
+                    <button
+                      onClick={() => handleMarkOrderFulfilled(order.id)}
+                      className="shrink-0 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold flex items-center gap-1"
+                    >
+                      <Check className="w-3 h-3" /> Fulfilled
+                    </button>
+                  )}
+                </div>
+                {order.product_note && (
+                  <p className="text-[11px] text-slate-700 font-bold line-clamp-2">{order.product_note}</p>
+                )}
+                {order.phone && (
+                  <p className="text-[11px] text-slate-600 font-medium flex items-center gap-1.5">
+                    <Phone className="w-3 h-3 shrink-0" /> {order.phone}
+                  </p>
+                )}
+                {order.address && (
+                  <p className="text-[11px] text-slate-600 font-medium flex items-center gap-1.5">
+                    <MapPin className="w-3 h-3 shrink-0" /> {order.address}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 

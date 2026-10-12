@@ -1449,6 +1449,36 @@ Output strictly a JSON object: { "eventDetected": boolean, "eventTitle": string|
   }
 }
 
+// Scans a single customer message for order-fulfillment details (name,
+// phone, address) so the business owner doesn't have to dig through chat
+// history to find them — saved to the orders table by the caller. Mirrors
+// detectEventInMessage's shape/caching above.
+async function detectOrderInMessage(text: string, fromName: string, userId?: string): Promise<{
+  orderDetected: boolean; customerName?: string | null; phone?: string | null; address?: string | null; productNote?: string | null;
+} | null> {
+  const apiKey = await resolveGeminiApiKey(userId);
+  if (!apiKey) return null;
+
+  try {
+    const ai = getGemini(apiKey);
+    const prompt = `A customer named "${fromName}" sent this message to a Myanmar business: "${text}"
+
+Does this message contain concrete order-fulfillment details — a phone number and/or a delivery address meant for completing a purchase? A bare question like "price?" or "what colors do you have?" does not count; this is specifically for the step where the customer is giving the business what it needs to ship/deliver something.
+
+Output strictly a JSON object: { "orderDetected": boolean, "customerName": string|null (a real name if given, separate from any platform username), "phone": string|null, "address": string|null, "productNote": string|null (what's being ordered, if mentioned or inferable from context) }`;
+
+    const response = await generateContentWithRetry(ai, {
+      model: 'gemini-flash-lite-latest',
+      contents: prompt,
+      config: { responseMimeType: 'application/json' },
+    });
+    return JSON.parse(response.text);
+  } catch (err) {
+    console.error('[orders] order detection failed:', err);
+    return null;
+  }
+}
+
 // A business pre-writes up to ~6 canned Q&A pairs (mirrors a Facebook Page's
 // native "Frequently Asked Questions" automation) — see /api/settings/faq
 // below. A customer message that matches one is answered straight from that
@@ -1623,6 +1653,23 @@ async function handleTelegramUpdate(update: any): Promise<void> {
       created_at: new Date().toISOString(),
     });
   }
+
+  const order = await detectOrderInMessage(text, finalCustomerName, contact.owner_user_id);
+  if (order?.orderDetected && (order.phone || order.address)) {
+    await insertRow('orders', {
+      id: 'ord_' + randomUUID(),
+      user_id: contact.owner_user_id,
+      platform: 'telegram',
+      customer_chat_id: chatId,
+      customer_name: order.customerName || finalCustomerName,
+      phone: order.phone || null,
+      address: order.address || null,
+      product_note: order.productNote || null,
+      source_message: text.slice(0, 500),
+      status: 'new',
+      created_at: new Date().toISOString(),
+    });
+  }
 }
 
 // Telegram POSTs each update here as soon as it happens (configured once via
@@ -1736,6 +1783,23 @@ async function handleFacebookEntry(entry: any): Promise<void> {
         importance: detected.importance || 'normal',
         source_subject: `Facebook Messenger — ${customerName}: ${text.slice(0, 120)}`,
         manual: false,
+        created_at: new Date().toISOString(),
+      });
+    }
+
+    const order = await detectOrderInMessage(text, customerName, account.user_id);
+    if (order?.orderDetected && (order.phone || order.address)) {
+      await insertRow('orders', {
+        id: 'ord_' + randomUUID(),
+        user_id: account.user_id,
+        platform: 'facebook',
+        customer_chat_id: senderId,
+        customer_name: order.customerName || customerName,
+        phone: order.phone || null,
+        address: order.address || null,
+        product_note: order.productNote || null,
+        source_message: text.slice(0, 500),
+        status: 'new',
         created_at: new Date().toISOString(),
       });
     }
@@ -2625,6 +2689,34 @@ app.delete('/api/posts/:id', requireAuth, async (req: AuthedRequest, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Orders — fulfillment details (name/phone/address) the AI pulled out of a
+// customer conversation (see detectOrderInMessage above), so the owner can
+// find them without scrolling back through chat history.
+// ---------------------------------------------------------------------------
+app.get('/api/orders', requireAuth, async (req: AuthedRequest, res) => {
+  try {
+    const orders = await selectMany('orders', { user_id: req.user!.id }, { orderBy: 'created_at', ascending: false });
+    return res.json({ orders });
+  } catch (err) {
+    console.error('[orders] list error:', err);
+    return res.status(500).json({ error: 'Could not load orders.' });
+  }
+});
+
+app.patch('/api/orders/:id', requireAuth, async (req: AuthedRequest, res) => {
+  const { status } = req.body;
+  if (!['new', 'fulfilled'].includes(status)) {
+    return res.status(400).json({ error: 'status must be "new" or "fulfilled".' });
+  }
+  try {
+    await updateRows('orders', { id: req.params.id, user_id: req.user!.id }, { status });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[orders] update error:', err);
+    return res.status(500).json({ error: 'Could not update this order.' });
+  }
+});
+
 // Customer Messages — real inbound messages (Telegram, routed via
 // telegram_contacts above; Facebook Messenger, routed via the connected
 // Page's external_id above) shown in the Customer DMs inbox.
