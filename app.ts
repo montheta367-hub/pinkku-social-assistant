@@ -2404,7 +2404,16 @@ async function publishPostNow(post: {
         results.telegram = { ok: false, error: 'No Telegram channel connected — add one in Settings.' };
         continue;
       }
-      const outcome = await sendTelegramBroadcast(botToken, channel.telegram_channel_id, message, post.media_url);
+      // The caption is written with a generic "message our Page" CTA that
+      // doesn't apply on Telegram (there's no Page here) — append this
+      // business's own bot deep-link so channel readers land in a chat
+      // that's correctly tagged to this owner_user_id, not some other
+      // business sharing the same shared bot. See telegram_contacts above.
+      const botUsername = await getTelegramBotUsername();
+      const telegramMessage = botUsername
+        ? `${message}\n\n📩 မှာယူရန် ဒီနေရာကို နှိပ်ပါ — https://t.me/${botUsername}?start=biz_${post.user_id}`
+        : message;
+      const outcome = await sendTelegramBroadcast(botToken, channel.telegram_channel_id, telegramMessage, post.media_url);
       results.telegram = outcome.ok
         ? { ok: true, externalId: String(outcome.messageId) }
         : { ok: false, error: outcome.error };
