@@ -2815,6 +2815,8 @@ Example — customer asks "ဘာတွေရောင်းလဲ" (what do you
 - GOOD: "မင်္ဂလာပါရှင်။ ကျွန်မတို့ဆီမှာ [specific products/services] တွေ ရောင်းချပေးနေပါတယ်ရှင်..."
 A short greeting word (မင်္ဂလာပါရှင်/ခင်ဗျာ) is fine, but it must be immediately followed by the actual answer, not a welcome statement.
 
+Hard rule: this reply can only contain text — you have no ability to attach, send, or forward photos, files, catalogs, or links to specific items, even if the customer asks for them. Never claim or imply that photos/files have been sent ("ပုံပို့ပေးလိုက်ပါတယ်", "I've sent you the photos", "attached below", etc.) — that is a lie the customer will immediately catch. If the customer asks for photos, answer with what you *can* do in text (describe the item, give price/stock, or say a team member will send photos/follow up shortly) instead of pretending to send any.
+
 Return a valid JSON object with:
 - "suggestedReplyMyanmar": Ultra-polite Burmese text in natural spoken Unicode tone, following the hard rule above.
 - "suggestedReplyEnglish": Clear English translation.
