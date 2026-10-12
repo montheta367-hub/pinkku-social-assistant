@@ -112,6 +112,44 @@ export const AnalyticsView: React.FC = () => {
 
           </div>
 
+          {/* Messages by Platform — single metric (count), so one consistent
+              brand hue per bar; the platform icon already carries identity,
+              so no categorical palette or legend is needed here. */}
+          {data.messages.total > 0 && (
+            <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm space-y-4">
+              <div>
+                <h3 className="text-base font-black text-slate-900">Messages by Channel</h3>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">{data.messages.total} total messages received</p>
+              </div>
+              <div className="space-y-3">
+                {([
+                  { key: 'telegram', count: data.messages.byPlatform.telegram },
+                  { key: 'facebook', count: data.messages.byPlatform.facebook },
+                ] as const)
+                  .filter(row => row.count > 0)
+                  .map((row) => {
+                    const max = Math.max(data.messages.byPlatform.telegram, data.messages.byPlatform.facebook, 1);
+                    const pct = Math.max((row.count / max) * 100, 4);
+                    return (
+                      <div key={row.key} className="flex items-center gap-3">
+                        <div className="w-24 flex items-center gap-1.5 shrink-0">
+                          <PlatformLogo platform={row.key} className="w-3.5 h-3.5" />
+                          <span className="text-xs font-bold text-slate-700 capitalize">{row.key}</span>
+                        </div>
+                        <div className="flex-1 h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-[#FF2D85]"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                        <span className="w-10 text-right text-xs font-black text-slate-900 shrink-0">{row.count}</span>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
+
           {/* Breakdown per Platform */}
           <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm space-y-4">
             <h3 className="text-base font-black text-slate-900">Publishing by Channel</h3>
