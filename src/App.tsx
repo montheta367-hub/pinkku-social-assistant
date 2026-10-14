@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { UserProfile, PlatformConnection, SocialPost, CustomerMessage, AIAgent } from './types';
-import { guestUserProfile, initialConnections, initialPosts, initialMessages, initialAIAgents, emptyConnections } from './mockData';
+import { UserProfile, PlatformConnection, SocialPost, CustomerMessage } from './types';
+import { guestUserProfile, initialConnections, initialPosts, initialMessages, emptyConnections } from './mockData';
 import { Navbar } from './components/Navbar';
 import { Sidebar, TabType } from './components/Sidebar';
 import { AuthModal } from './components/AuthModal';
@@ -17,7 +17,6 @@ import { CustomerReplyView } from './views/CustomerReplyView';
 import { GmailAIView } from './views/GmailAIView';
 import { AISmartScheduleView } from './views/AISmartScheduleView';
 import { TikTokManagementView } from './views/TikTokManagementView';
-import { AIAgentsView } from './views/AIAgentsView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { SettingsView } from './views/SettingsView';
 
@@ -43,7 +42,6 @@ export const App: React.FC = () => {
   );
   const [posts, setPosts] = useState<SocialPost[]>(() => (user.isLoggedIn && user.email === 'amonthet5@gmail.com' ? initialPosts : []));
   const [messages, setMessages] = useState<CustomerMessage[]>(() => (user.isLoggedIn && user.email === 'amonthet5@gmail.com' ? initialMessages : []));
-  const [agents] = useState<AIAgent[]>(initialAIAgents);
 
   // Modals
   const [isAuthOpen, setIsAuthOpen] = useState(false);
@@ -468,10 +466,6 @@ export const App: React.FC = () => {
               onSelectTab={setCurrentTab}
               onDisconnected={fetchRealConnections}
             />
-          )}
-
-          {currentTab === 'agents' && (
-            <AIAgentsView agents={agents} />
           )}
 
           {currentTab === 'analytics' && (

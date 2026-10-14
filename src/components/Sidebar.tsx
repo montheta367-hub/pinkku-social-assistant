@@ -5,7 +5,6 @@ import {
   Calendar,
   MessageSquare,
   Mail,
-  Bot,
   BarChart3,
   Settings,
   Music2,
@@ -22,7 +21,6 @@ export type TabType =
   | 'gmail'
   | 'schedule'
   | 'tiktok'
-  | 'agents'
   | 'analytics'
   | 'settings';
 
@@ -48,7 +46,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'gmail' as TabType, label: 'Google Business Inbox', icon: Mail },
     { id: 'schedule' as TabType, label: 'Smart Schedule', icon: CalendarClock },
     { id: 'tiktok' as TabType, label: 'TikTok Management', icon: Music2 },
-    { id: 'agents' as TabType, label: 'Autonomous AI Crew', icon: Bot, badge: 'New' },
     { id: 'analytics' as TabType, label: 'Smart Report', icon: BarChart3 },
     { id: 'settings' as TabType, label: 'Settings', icon: Settings },
   ];

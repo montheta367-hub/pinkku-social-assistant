@@ -1,4 +1,4 @@
-import { PlatformConnection, SocialPost, CustomerMessage, AIAgent, UserProfile } from './types';
+import { PlatformConnection, SocialPost, CustomerMessage, UserProfile } from './types';
 
 // Shown before sign-up/login — no account, no data, redirected to the landing page.
 export const guestUserProfile: UserProfile = {
@@ -212,49 +212,3 @@ export const initialMessages: CustomerMessage[] = [
   }
 ];
 
-export const initialAIAgents: AIAgent[] = [
-  {
-    id: 'agent_social_strategist',
-    name: 'Content Planner',
-    role: 'Social Media & Caption AI',
-    description: 'Generates viral captions, hashtags, and schedule suggestions tailored for Myanmar Facebook, TikTok, and Instagram audiences.',
-    avatar: '👩‍💼',
-    status: 'active',
-    specialty: 'Myanmar Marketing Copy & TikTok Scripting',
-    tasksCompleted: 412,
-    accuracy: '98.5%'
-  },
-  {
-    id: 'agent_customer_rep',
-    name: 'Sales & CS Bot',
-    role: '24/7 Customer Care & Order Taker',
-    description: 'Reads customer DMs across Facebook, Telegram & TikTok, understands Burmese slang & Zawgyi/Unicode, and drafts instant professional replies.',
-    avatar: '🌸',
-    status: 'active',
-    specialty: 'Customer Engagement & Fast Closing',
-    tasksCompleted: 1280,
-    accuracy: '99.2%'
-  },
-  {
-    id: 'agent_email_manager',
-    name: 'Gmail AI Executive',
-    role: 'Business & Supplier Inbox Assistant',
-    description: 'Categorizes incoming supplier emails, invoices, partnership inquiries, and drafts formal bilingual responses.',
-    avatar: '👨‍💻',
-    status: 'active',
-    specialty: 'B2B Correspondence & Order Tracking',
-    tasksCompleted: 195,
-    accuracy: '97.8%'
-  },
-  {
-    id: 'agent_analytics_guru',
-    name: 'Data Spider (Growth Analyst)',
-    role: 'Cross-Platform Intelligence',
-    description: 'Tracks engagement spikes, best posting times, top selling items, and ad spend efficiency.',
-    avatar: '🕷️',
-    status: 'active',
-    specialty: 'ROI Analysis & Audience Demographics',
-    tasksCompleted: 340,
-    accuracy: '99.0%'
-  }
-];

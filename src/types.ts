@@ -61,18 +61,6 @@ export interface CustomerMessage {
   orderIntent?: boolean;
 }
 
-export interface AIAgent {
-  id: string;
-  name: string;
-  role: string;
-  description: string;
-  avatar: string;
-  status: 'active' | 'standby' | 'working';
-  specialty: string;
-  tasksCompleted: number;
-  accuracy: string;
-}
-
 export interface AnalyticsMetric {
   label: string;
   value: string;
