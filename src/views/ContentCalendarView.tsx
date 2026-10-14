@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { SocialPost, PlatformType } from '../types';
 import { PlatformLogo } from '../components/PlatformLogo';
-import { Calendar, Plus, ChevronLeft, ChevronRight, Mail, CalendarPlus, CalendarCheck, FileText, ClipboardCheck, Trash2, Undo2, Check, Send, Loader2 } from 'lucide-react';
+import { Calendar, Plus, ChevronLeft, ChevronRight, Mail, CalendarPlus, CalendarCheck, FileText, ClipboardCheck, Trash2, Undo2, Check, Send, Loader2, X, Clock } from 'lucide-react';
 
 interface ContentCalendarViewProps {
   posts: SocialPost[];
@@ -32,6 +32,17 @@ const IMPORTANCE_STYLE: Record<Importance, { bg: string; border: string; tag: st
 };
 
 const IMPORTANCE_RANK: Record<Importance, number> = { urgent: 0, important: 1, normal: 2, low: 3 };
+
+// Dresses the real post.status up in the Plan→Publish language teams expect
+// on a work board, without inventing any data the post doesn't actually have.
+const STATUS_META: Record<string, { label: string; badge: string; stageIndex: number }> = {
+  draft: { label: 'To Do', badge: 'bg-slate-100 text-slate-600', stageIndex: 0 },
+  pending_review: { label: 'In Review', badge: 'bg-amber-100 text-amber-700', stageIndex: 1 },
+  scheduled: { label: 'Scheduled', badge: 'bg-sky-100 text-sky-700', stageIndex: 2 },
+  published: { label: 'Approved', badge: 'bg-emerald-100 text-emerald-800', stageIndex: 3 },
+  failed: { label: 'Failed', badge: 'bg-rose-100 text-rose-700', stageIndex: 2 },
+};
+const WORKFLOW_STAGES = ['To Do', 'In Review', 'Scheduled', 'Published'];
 
 function toISODate(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -101,6 +112,7 @@ export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
   const [weekOffset, setWeekOffset] = useState(0);
   const [monthOffset, setMonthOffset] = useState(0);
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
+  const [selectedPost, setSelectedPost] = useState<SocialPost | null>(null);
   const [detectedEvents, setDetectedEvents] = useState<DetectedEvent[]>([]);
   const [detectedStatus, setDetectedStatus] = useState<'idle' | 'loading' | 'ready' | 'not_connected' | 'error'>('idle');
   const [addedEventIds, setAddedEventIds] = useState<Set<string>>(new Set());
@@ -476,19 +488,19 @@ export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
                   <div className="space-y-1 flex-1">
                     {visiblePosts.map((post) => {
                       const anyFailed = post.targets?.some(t => t.status === 'failed');
-                      const anyPublished = post.targets?.some(t => t.status === 'published');
+                      const meta = anyFailed ? STATUS_META.failed : (STATUS_META[post.status] || STATUS_META.draft);
                       return (
-                        <div
+                        <button
                           key={post.id}
                           title={post.title}
-                          className={`px-1.5 py-1 rounded-md text-[9px] font-bold truncate ${
-                            anyFailed ? 'bg-rose-100 text-rose-700' :
-                            anyPublished ? 'bg-emerald-100 text-emerald-800' :
-                            'bg-slate-100 text-slate-700'
-                          }`}
+                          onClick={() => setSelectedPost(post)}
+                          className="w-full text-left px-1.5 py-1 rounded-md bg-pink-50 hover:bg-pink-100 border border-pink-100 transition-colors"
                         >
-                          {post.title}
-                        </div>
+                          <p className="text-[9px] font-black text-slate-800 truncate leading-tight">{post.title}</p>
+                          <span className={`inline-block mt-0.5 px-1 py-0.5 rounded text-[7px] font-black uppercase ${meta.badge}`}>
+                            {meta.label}
+                          </span>
+                        </button>
                       );
                     })}
                     {hiddenCount > 0 && (
@@ -648,6 +660,95 @@ export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
         })}
       </div>
       )}
+
+      {/* Task Detail — the Plan→Publish stage tracker is derived entirely
+          from this post's own real status; nothing here is invented. */}
+      {selectedPost && (() => {
+        const meta = STATUS_META[selectedPost.status] || STATUS_META.draft;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4" onClick={() => setSelectedPost(null)}>
+            <div
+              className="w-full max-w-lg bg-white rounded-3xl p-6 border border-slate-100 shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase ${meta.badge}`}>
+                  {meta.label}
+                </span>
+                <button onClick={() => setSelectedPost(null)} className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <h2 className="text-xl font-black text-slate-900">{selectedPost.title}</h2>
+              {selectedPost.myanmarContent && (
+                <p className="text-xs text-slate-600 font-medium leading-relaxed">{selectedPost.myanmarContent}</p>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/70">
+                  <p className="text-[10px] font-bold text-slate-400 flex items-center gap-1"><Clock className="w-3 h-3" /> Scheduled</p>
+                  <p className="text-xs font-black text-slate-800 mt-0.5">
+                    {selectedPost.scheduledDate || 'Not set'} {selectedPost.scheduledTime ? `· ${selectedPost.scheduledTime}` : ''}
+                  </p>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/70">
+                  <p className="text-[10px] font-bold text-slate-400">Platforms</p>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    {selectedPost.platforms.map(p => <PlatformLogo key={p} platform={p} className="w-4 h-4" />)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Stage tracker */}
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 mb-2">Progress</p>
+                <div className="flex items-center">
+                  {WORKFLOW_STAGES.map((stage, i) => {
+                    const done = i <= meta.stageIndex && selectedPost.status !== 'failed';
+                    return (
+                      <React.Fragment key={stage}>
+                        <div className="flex flex-col items-center gap-1">
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${
+                            done ? 'bg-[#FF2D85] text-white' : 'bg-slate-100 text-slate-400'
+                          }`}>
+                            {done ? <Check className="w-3 h-3" /> : i + 1}
+                          </div>
+                          <span className={`text-[8px] font-bold ${done ? 'text-slate-700' : 'text-slate-300'}`}>{stage}</span>
+                        </div>
+                        {i < WORKFLOW_STAGES.length - 1 && (
+                          <div className={`flex-1 h-0.5 mb-4 ${i < meta.stageIndex ? 'bg-[#FF2D85]' : 'bg-slate-100'}`} />
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {selectedPost.targets && selectedPost.targets.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 mb-1.5">Per-platform status</p>
+                  <div className="space-y-1.5">
+                    {selectedPost.targets.map(t => (
+                      <div key={t.platform} className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 border border-slate-200/70">
+                        <div className="flex items-center gap-2">
+                          <PlatformLogo platform={t.platform} className="w-4 h-4" />
+                          <span className="text-xs font-bold text-slate-700 capitalize">{t.platform}</span>
+                        </div>
+                        <span className={`text-[10px] font-black ${
+                          t.status === 'published' ? 'text-emerald-600' : t.status === 'failed' ? 'text-rose-600' : 'text-slate-400'
+                        }`}>
+                          {t.status === 'failed' && t.error ? t.error : t.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );
