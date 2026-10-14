@@ -5,7 +5,8 @@ import {
   Calendar,
   MessageSquare,
   BarChart3,
-  Settings
+  Settings,
+  X
 } from 'lucide-react';
 import pinkkuIcon from '../assets/pinkku-icon.png';
 import { PlatformConnection } from '../types';
@@ -26,13 +27,17 @@ interface SidebarProps {
   onSelectTab: (tab: TabType) => void;
   unreadMessagesCount: number;
   connections: PlatformConnection[];
+  isOpen: boolean;
+  onClose: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   currentTab,
   onSelectTab,
   unreadMessagesCount,
-  connections
+  connections,
+  isOpen,
+  onClose
 }) => {
   const connectedCount = connections.filter(c => c.connected).length;
   const menuItems = [
@@ -45,10 +50,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   return (
-    <aside className="w-full md:w-64 shrink-0 bg-pink-50 border-r border-pink-200/70 p-4 space-y-6 flex flex-col justify-between">
+    <>
+      {/* Backdrop — mobile/tablet only, closes the drawer on outside tap */}
+      {isOpen && (
+        <div className="fixed inset-0 z-40 bg-slate-900/40 md:hidden" onClick={onClose} />
+      )}
+
+      <aside className={`
+        fixed md:static inset-y-0 left-0 z-50 w-72 md:w-64 shrink-0 bg-pink-50 border-r border-pink-200/70 p-4 space-y-6 flex flex-col justify-between
+        overflow-y-auto transition-transform duration-200 ease-out
+        ${isOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0
+      `}>
       <div className="space-y-1">
-        <div className="px-3 py-2 text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-          Management
+        <div className="flex items-center justify-between px-3 py-2">
+          <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+            Management
+          </span>
+          <button onClick={onClose} className="md:hidden p-1 rounded-lg hover:bg-white/60 text-slate-500">
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
         <nav className="space-y-1">
@@ -59,7 +79,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             return (
               <button
                 key={item.id}
-                onClick={() => onSelectTab(item.id)}
+                onClick={() => { onSelectTab(item.id); onClose(); }}
                 className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all ${
                   isActive
                     ? 'bg-white text-[#FF2D85] shadow-sm font-extrabold'
@@ -114,6 +134,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 };
