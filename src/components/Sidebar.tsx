@@ -29,6 +29,7 @@ interface SidebarProps {
   connections: PlatformConnection[];
   isOpen: boolean;
   onClose: () => void;
+  topOffset: number;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -37,7 +38,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   unreadMessagesCount,
   connections,
   isOpen,
-  onClose
+  onClose,
+  topOffset
 }) => {
   const connectedCount = connections.filter(c => c.connected).length;
   const menuItems = [
@@ -53,14 +55,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <>
       {/* Backdrop — mobile/tablet only, closes the drawer on outside tap */}
       {isOpen && (
-        <div className="fixed left-0 right-0 bottom-0 top-[81px] z-40 bg-pink-50 md:hidden" onClick={onClose} />
+        <div
+          className="fixed left-0 right-0 bottom-0 z-40 bg-pink-50 md:hidden"
+          style={{ top: topOffset }}
+          onClick={onClose}
+        />
       )}
 
-      <aside className={`
-        fixed md:static left-0 bottom-0 top-[81px] md:top-auto md:inset-y-0 z-50 w-72 md:w-64 shrink-0 bg-pink-50 border-r border-pink-200/70 p-4 space-y-6 flex flex-col justify-between
-        overflow-y-auto transition-transform duration-200 ease-out
-        ${isOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0
-      `}>
+      <aside
+        className={`
+          fixed md:static left-0 bottom-0 z-50 w-72 md:w-64 shrink-0 bg-pink-50 border-r border-pink-200/70 p-4 space-y-6 flex flex-col justify-between
+          overflow-y-auto transition-transform duration-200 ease-out
+          ${isOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0
+        `}
+        style={{ top: topOffset }}
+      >
       <div className="space-y-1">
         <div className="flex items-center justify-between px-3 py-2">
           <span className="text-xs md:text-[11px] font-extrabold uppercase tracking-wider text-slate-400">

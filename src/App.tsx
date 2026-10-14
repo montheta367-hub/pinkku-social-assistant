@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Menu } from 'lucide-react';
 import { UserProfile, PlatformConnection, SocialPost, CustomerMessage } from './types';
 import { guestUserProfile, initialConnections, initialPosts, initialMessages, emptyConnections } from './mockData';
@@ -36,6 +36,8 @@ export const App: React.FC = () => {
 
   const [currentTab, setCurrentTab] = useState<TabType>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
   // The seeded showcase account (amonthet5@gmail.com) gets the demo data via
   // handleLoginSuccess below; every other account starts clean — real data
   // loads in from the backend once logged in, not fabricated numbers.
@@ -55,6 +57,18 @@ export const App: React.FC = () => {
   const [fbPageSelectionToken, setFbPageSelectionToken] = useState<string | null>(null);
 
   const [connectNotice, setConnectNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Keep the mobile drawer anchored right below the navbar (and the notice
+  // banner, when shown) — measured live since both can change height.
+  useLayoutEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const update = () => setHeaderHeight(el.getBoundingClientRect().height);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [connectNotice]);
 
   // Platforms with a real backend connection (as opposed to the local-only toggle).
   const REAL_PLATFORMS = ['gmail', 'telegram', 'facebook', 'tiktok', 'instagram'];
@@ -375,30 +389,32 @@ export const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-100 via-pink-50 to-rose-100 text-slate-900 flex flex-col">
       {/* Top Navbar */}
-      <Navbar
-        user={user}
-        onOpenAuth={(mode = 'login') => {
-          setAuthMode(mode);
-          setIsAuthOpen(true);
-        }}
-        onLogout={handleLogout}
-        onOpenUpgrade={() => setIsUpgradeOpen(true)}
-        onOpenApiKey={() => setIsApiKeyOpen(true)}
-      />
+      <div ref={headerRef} className="sticky top-0 z-30">
+        <Navbar
+          user={user}
+          onOpenAuth={(mode = 'login') => {
+            setAuthMode(mode);
+            setIsAuthOpen(true);
+          }}
+          onLogout={handleLogout}
+          onOpenUpgrade={() => setIsUpgradeOpen(true)}
+          onOpenApiKey={() => setIsApiKeyOpen(true)}
+        />
 
-      {connectNotice && (
-        <div className={`px-4 sm:px-6 py-2.5 text-xs font-bold flex items-center justify-between gap-3 ${
-          connectNotice.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-b border-emerald-200' : 'bg-rose-50 text-rose-800 border-b border-rose-200'
-        }`}>
-          <span className="max-w-7xl w-full mx-auto flex-1">{connectNotice.message}</span>
-          <button
-            onClick={() => setConnectNotice(null)}
-            className="opacity-60 hover:opacity-100 transition-opacity"
-          >
-            ✕
-          </button>
-        </div>
-      )}
+        {connectNotice && (
+          <div className={`px-4 sm:px-6 py-2.5 text-xs font-bold flex items-center justify-between gap-3 ${
+            connectNotice.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-b border-emerald-200' : 'bg-rose-50 text-rose-800 border-b border-rose-200'
+          }`}>
+            <span className="max-w-7xl w-full mx-auto flex-1">{connectNotice.message}</span>
+            <button
+              onClick={() => setConnectNotice(null)}
+              className="opacity-60 hover:opacity-100 transition-opacity"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col md:flex-row max-w-7xl w-full mx-auto">
@@ -409,6 +425,7 @@ export const App: React.FC = () => {
           connections={connections}
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
+          topOffset={headerHeight}
         />
 
         {/* Mobile/tablet menu toggle — sidebar is an off-canvas drawer below md */}
