@@ -53,7 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <>
       {/* Backdrop — mobile/tablet only, closes the drawer on outside tap */}
       {isOpen && (
-        <div className="fixed inset-0 z-40 bg-pink-100 md:hidden" onClick={onClose} />
+        <div className="fixed inset-0 z-40 bg-pink-50 md:hidden" onClick={onClose} />
       )}
 
       <aside className={`
