@@ -67,7 +67,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
       </header>
 
       {/* ================= HERO ================= */}
-      <section className="relative overflow-hidden bg-gradient-to-b from-pink-50/70 via-white to-white">
+      <section className="relative overflow-hidden bg-gradient-to-b from-pink-50/70 via-white to-pink-50">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-14 pb-6 text-center space-y-7 relative z-10">
           <h1 className="text-4xl sm:text-6xl font-black text-slate-900 tracking-tight max-w-4xl mx-auto leading-[1.12]">
             All your business channels.
