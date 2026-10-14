@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Sparkles,
   ArrowRight,
@@ -8,6 +8,8 @@ import {
   Link2,
   Bot,
   ShieldCheck,
+  Menu,
+  X,
 } from 'lucide-react';
 import { PlatformLogo } from '../components/PlatformLogo';
 import { PinkkuWebDiagram } from '../components/PinkkuWebDiagram';
@@ -30,40 +32,87 @@ const PLATFORMS = [
 ];
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin }) => {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const navLinks = [
+    { href: '#solution', label: 'Product' },
+    { href: '#how', label: 'How it works' },
+    { href: '#preview', label: 'Dashboard' },
+    { href: '#features', label: 'Features' },
+  ];
+
   return (
     <div className="min-h-screen bg-pink-50 text-slate-900">
 
       {/* ================= NAV ================= */}
       <header className="sticky top-0 z-40 backdrop-blur-md bg-pink-50/80 border-b border-pink-100">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <img src={pinkkuIcon} alt="Pinkku" className="h-14 w-auto object-contain shrink-0 animate-spider-swing" />
-            <span className="text-xl font-black text-slate-900 tracking-tight">Pinkku</span>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <img src={pinkkuIcon} alt="Pinkku" className="h-10 sm:h-14 w-auto object-contain shrink-0 animate-spider-swing" />
+            <span className="text-lg sm:text-2xl font-black text-slate-900 tracking-tight truncate">Pinkku</span>
           </div>
 
-          <nav className="hidden md:flex items-center gap-8 text-xs font-bold text-slate-600">
-            <a href="#solution" className="hover:text-slate-900 transition-colors">Product</a>
-            <a href="#how" className="hover:text-slate-900 transition-colors">How it works</a>
-            <a href="#preview" className="hover:text-slate-900 transition-colors">Dashboard</a>
-            <a href="#features" className="hover:text-slate-900 transition-colors">Features</a>
+          <nav className="hidden lg:flex items-center gap-8 text-base font-bold text-slate-600">
+            {navLinks.map((link) => (
+              <a key={link.href} href={link.href} className="hover:text-slate-900 transition-colors">{link.label}</a>
+            ))}
           </nav>
 
-          <div className="flex items-center gap-3">
+          <div className="hidden lg:flex items-center gap-3">
             <button
               onClick={onLogin}
-              className="px-4 py-2 rounded-xl text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors"
+              className="px-4 py-2.5 rounded-xl text-sm font-bold text-slate-700 hover:text-slate-900 transition-colors"
             >
               Log In
             </button>
             <button
               onClick={onGetStarted}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-[#FF2D85] text-white font-extrabold text-xs shadow-md shadow-pink-500/25 hover:opacity-95 transition-all flex items-center gap-2"
+              className="px-5 py-3 rounded-xl bg-gradient-to-r from-pink-500 to-[#FF2D85] text-white font-extrabold text-sm shadow-md shadow-pink-500/25 hover:opacity-95 transition-all flex items-center gap-2"
             >
               <span>Get Started</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
+
+          {/* Mobile/tablet menu toggle — nav links collapse under lg */}
+          <button
+            onClick={() => setMobileMenuOpen(o => !o)}
+            className="lg:hidden p-2 rounded-xl text-slate-700 hover:bg-pink-100 transition-colors shrink-0"
+            aria-label="Toggle menu"
+          >
+            {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+          </button>
         </div>
+
+        {mobileMenuOpen && (
+          <div className="lg:hidden border-t border-pink-100 bg-pink-50 px-4 sm:px-6 py-4 space-y-1">
+            {navLinks.map((link) => (
+              <a
+                key={link.href}
+                href={link.href}
+                onClick={() => setMobileMenuOpen(false)}
+                className="block px-3 py-2.5 rounded-xl text-sm font-bold text-slate-700 hover:bg-white transition-colors"
+              >
+                {link.label}
+              </a>
+            ))}
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                onClick={() => { setMobileMenuOpen(false); onLogin(); }}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-700"
+              >
+                Log In
+              </button>
+              <button
+                onClick={() => { setMobileMenuOpen(false); onGetStarted(); }}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-[#FF2D85] text-white font-extrabold text-sm shadow-sm flex items-center justify-center gap-2"
+              >
+                <span>Get Started</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </header>
 
       {/* ================= HERO ================= */}
