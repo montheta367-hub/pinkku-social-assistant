@@ -69,7 +69,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
               onClick={onGetStarted}
               className="px-5 py-3 rounded-xl bg-gradient-to-r from-pink-500 to-[#FF2D85] text-white font-extrabold text-sm shadow-md shadow-pink-500/25 hover:opacity-95 transition-all flex items-center gap-2"
             >
-              <span>Get Started</span>
+              <span>Sign Up</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
@@ -107,7 +107,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
                 onClick={() => { setMobileMenuOpen(false); onGetStarted(); }}
                 className="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-[#FF2D85] text-white font-extrabold text-sm shadow-sm flex items-center justify-center gap-2"
               >
-                <span>Get Started</span>
+                <span>Sign Up</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
