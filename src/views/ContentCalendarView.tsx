@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { SocialPost, PlatformType } from '../types';
 import { PlatformLogo } from '../components/PlatformLogo';
-import { Calendar, Plus, ChevronLeft, ChevronRight, Mail, CalendarPlus, CalendarCheck, FileText, ClipboardCheck, Trash2, Undo2, Check, Send, Loader2, X, Clock } from 'lucide-react';
+import { Calendar, Plus, ChevronLeft, ChevronRight, Mail, CalendarPlus, CalendarCheck, FileText, ClipboardCheck, Trash2, Undo2, Check, Send, Loader2, X, Clock, CalendarClock } from 'lucide-react';
+import { TabType } from '../components/Sidebar';
 
 interface ContentCalendarViewProps {
   posts: SocialPost[];
@@ -11,6 +12,7 @@ interface ContentCalendarViewProps {
   onPublishNow: (id: string) => Promise<{ success: boolean; results?: Record<string, { ok: boolean; error?: string }> }>;
   onRequestChanges: (id: string) => void;
   onDeleteDraft: (id: string) => void;
+  onSelectTab: (tab: TabType) => void;
 }
 
 type Importance = 'urgent' | 'important' | 'normal' | 'low';
@@ -105,7 +107,7 @@ function getMonthGrid(monthStart: Date): { iso: string; dayNum: number; inMonth:
 }
 
 export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
-  posts, onCreatePost, onSubmitForReview, onApprovePost, onPublishNow, onRequestChanges, onDeleteDraft
+  posts, onCreatePost, onSubmitForReview, onApprovePost, onPublishNow, onRequestChanges, onDeleteDraft, onSelectTab
 }) => {
   const [filterPlatform, setFilterPlatform] = useState<string>("all");
   const [viewMode, setViewMode] = useState<'week' | 'month'>('month');
@@ -229,13 +231,23 @@ export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={onCreatePost}
-          className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-[#FF2D85] text-white font-extrabold text-xs shadow-md shadow-pink-500/25 hover:opacity-95 transition-all flex items-center gap-2 self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Post Schedule</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            onClick={() => onSelectTab('schedule')}
+            className="px-3.5 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs flex items-center gap-2"
+          >
+            <CalendarClock className="w-4 h-4" />
+            <span>Smart Schedule</span>
+          </button>
+
+          <button
+            onClick={onCreatePost}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-[#FF2D85] text-white font-extrabold text-xs shadow-md shadow-pink-500/25 hover:opacity-95 transition-all flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            <span>New Post Schedule</span>
+          </button>
+        </div>
       </div>
 
       {/* Pending Review */}

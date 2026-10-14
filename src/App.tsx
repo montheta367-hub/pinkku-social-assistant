@@ -438,6 +438,7 @@ export const App: React.FC = () => {
               onPublishNow={handlePublishNow}
               onRequestChanges={handleRequestChanges}
               onDeleteDraft={handleDeleteDraft}
+              onSelectTab={setCurrentTab}
             />
           )}
 
@@ -446,6 +447,7 @@ export const App: React.FC = () => {
               user={user}
               messages={messages}
               onUpdateMessage={handleUpdateMessage}
+              onSelectTab={setCurrentTab}
             />
           )}
 
@@ -482,6 +484,7 @@ export const App: React.FC = () => {
               onOpenUpgrade={() => setIsUpgradeOpen(true)}
               onOpenApiKey={() => setIsApiKeyOpen(true)}
               onLogout={handleLogout}
+              onSelectTab={setCurrentTab}
             />
           )}
         </main>

@@ -4,11 +4,8 @@ import {
   PenTool,
   Calendar,
   MessageSquare,
-  Mail,
   BarChart3,
-  Settings,
-  Music2,
-  CalendarClock
+  Settings
 } from 'lucide-react';
 import pinkkuIcon from '../assets/pinkku-icon.png';
 import { PlatformConnection } from '../types';
@@ -43,9 +40,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'creator' as TabType, label: 'Smart Publish', icon: PenTool, badge: 'AI' },
     { id: 'calendar' as TabType, label: 'Smart Work', icon: Calendar },
     { id: 'messages' as TabType, label: 'Smart Engage', icon: MessageSquare, count: unreadMessagesCount },
-    { id: 'gmail' as TabType, label: 'Google Business Inbox', icon: Mail },
-    { id: 'schedule' as TabType, label: 'Smart Schedule', icon: CalendarClock },
-    { id: 'tiktok' as TabType, label: 'TikTok Management', icon: Music2 },
     { id: 'analytics' as TabType, label: 'Smart Report', icon: BarChart3 },
     { id: 'settings' as TabType, label: 'Settings', icon: Settings },
   ];

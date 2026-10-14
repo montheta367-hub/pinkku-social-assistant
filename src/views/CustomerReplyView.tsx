@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CustomerMessage, UserProfile } from '../types';
+import { TabType } from '../components/Sidebar';
 import { PlatformLogo } from '../components/PlatformLogo';
 import {
   MessageSquare,
@@ -26,6 +27,7 @@ interface CustomerReplyViewProps {
   user: UserProfile;
   messages: CustomerMessage[];
   onUpdateMessage: (id: string, replyText: string) => void;
+  onSelectTab: (tab: TabType) => void;
 }
 
 interface FaqEntry {
@@ -52,7 +54,8 @@ const FAQ_MAX_ENTRIES = 6;
 export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
   user,
   messages,
-  onUpdateMessage
+  onUpdateMessage,
+  onSelectTab
 }) => {
   const [selectedMsgId, setSelectedMsgId] = useState<string>(messages[0]?.id || "");
   const [activeReply, setActiveReply] = useState<string>("");
@@ -337,6 +340,12 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
           }`}
         >
           Comments
+        </button>
+        <button
+          onClick={() => onSelectTab('gmail')}
+          className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-700 transition-all"
+        >
+          Email
         </button>
       </div>
 

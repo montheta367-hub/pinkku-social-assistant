@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { UserProfile } from '../types';
-import { Settings, User, Building, Mail, ShieldCheck, Key, LogOut, Check, Sparkles } from 'lucide-react';
+import { Settings, User, Building, Mail, ShieldCheck, Key, LogOut, Check, Sparkles, Music2 } from 'lucide-react';
+import { TabType } from '../components/Sidebar';
 
 interface SettingsViewProps {
   user: UserProfile;
@@ -8,6 +9,7 @@ interface SettingsViewProps {
   onOpenUpgrade: () => void;
   onOpenApiKey: () => void;
   onLogout: () => void;
+  onSelectTab: (tab: TabType) => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -15,7 +17,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onUpdateUser,
   onOpenUpgrade,
   onOpenApiKey,
-  onLogout
+  onLogout,
+  onSelectTab
 }) => {
   const [name, setName] = useState(user.name);
   const [email, setEmail] = useState(user.email);
@@ -128,7 +131,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
       {/* Integration & Subscription actions */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        
+
+        <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-sm space-y-3">
+          <div className="flex items-center gap-2 text-slate-900 font-black text-sm">
+            <Music2 className="w-4 h-4 text-slate-700" />
+            <span>TikTok Management</span>
+          </div>
+          <p className="text-xs text-slate-500 font-medium">
+            Connect your TikTok account and manage your profile from Pinkku.
+          </p>
+          <button
+            onClick={() => onSelectTab('tiktok')}
+            className="w-full py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 font-bold text-xs text-slate-700 transition-all"
+          >
+            Open TikTok Management
+          </button>
+        </div>
+
         <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-sm space-y-3">
           <div className="flex items-center gap-2 text-slate-900 font-black text-sm">
             <Key className="w-4 h-4 text-amber-500" />
