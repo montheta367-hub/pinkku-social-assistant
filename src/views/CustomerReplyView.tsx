@@ -76,6 +76,7 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
   const [orders, setOrders] = useState<OrderEntry[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [engageTab, setEngageTab] = useState<'dm' | 'comments'>('dm');
+  const [inboxPlatform, setInboxPlatform] = useState<string>('all');
 
   const loadOrders = async () => {
     const token = localStorage.getItem('pinkku_token');
@@ -251,6 +252,7 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
   };
 
   const selectedMsg = messages.find(m => m.id === selectedMsgId) || messages[0];
+  const filteredMessages = inboxPlatform === 'all' ? messages : messages.filter(m => m.platform === inboxPlatform);
 
   const handleSelectMessage = (msg: CustomerMessage) => {
     setSelectedMsgId(msg.id);
@@ -569,12 +571,29 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
         {/* Messages List (Left Column) */}
         <div className="lg:col-span-5 bg-white rounded-3xl p-4 sm:p-5 border border-slate-200/80 shadow-sm space-y-3">
           <div className="flex items-center justify-between px-2 pb-2 border-b border-slate-100">
-            <span className="text-xs font-black text-slate-800">Inbox ({messages.length})</span>
+            <span className="text-xs font-black text-slate-800">Inbox ({filteredMessages.length})</span>
             <span className="text-[11px] font-bold text-slate-400">Synced across channels</span>
           </div>
 
+          <div className="flex items-center gap-1.5 flex-wrap px-2">
+            {['all', 'facebook', 'instagram', 'tiktok', 'telegram'].map((plat) => (
+              <button
+                key={plat}
+                onClick={() => setInboxPlatform(plat)}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold capitalize transition-all ${
+                  inboxPlatform === plat ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {plat}
+              </button>
+            ))}
+          </div>
+
           <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
-            {messages.map((msg) => {
+            {filteredMessages.length === 0 && (
+              <p className="text-[11px] text-slate-300 font-medium text-center py-8">No messages from this channel yet.</p>
+            )}
+            {filteredMessages.map((msg) => {
               const isSelected = msg.id === selectedMsg?.id;
               return (
                 <button
