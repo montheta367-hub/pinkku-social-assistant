@@ -371,9 +371,9 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-100 via-pink-50 to-rose-100 text-slate-900 flex flex-col">
+    <div className="min-h-screen md:h-screen md:overflow-hidden bg-gradient-to-br from-pink-100 via-pink-50 to-rose-100 text-slate-900 flex flex-col">
       {/* Top Navbar */}
-      <div className="sticky top-0 z-30">
+      <div className="shrink-0 sticky top-0 z-30">
         <Navbar
           user={user}
           onOpenAuth={(mode = 'login') => {
@@ -401,7 +401,7 @@ export const App: React.FC = () => {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col md:flex-row max-w-7xl w-full mx-auto">
+      <div className="flex-1 flex flex-col md:flex-row max-w-7xl w-full mx-auto md:overflow-hidden">
         <Sidebar
           currentTab={currentTab}
           onSelectTab={setCurrentTab}

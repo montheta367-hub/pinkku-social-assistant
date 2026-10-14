@@ -45,7 +45,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   return (
-    <aside className="flex w-full md:w-64 shrink-0 bg-pink-50 border-r border-pink-200/70 p-4 space-y-6 flex-col justify-between">
+    <aside className="flex w-full md:w-64 shrink-0 bg-pink-50 border-r border-pink-200/70 p-4 space-y-6 flex-col justify-between md:overflow-y-auto">
       <div className="space-y-1">
         <div className="px-3 py-2">
           <span className="text-xs md:text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
