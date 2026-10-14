@@ -138,7 +138,7 @@ export const ContentCreatorView: React.FC<ContentCreatorViewProps> = ({ user, on
     <div className="space-y-6 max-w-3xl mx-auto pb-12">
       
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="sticky top-0 z-10 -mt-4 sm:-mt-6 lg:-mt-8 pt-4 sm:pt-6 lg:pt-8 pb-3 bg-pink-50/95 backdrop-blur-sm border-b border-pink-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
             <span className="text-xl">✍️</span>
