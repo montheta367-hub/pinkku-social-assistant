@@ -53,7 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <>
       {/* Backdrop — mobile/tablet only, closes the drawer on outside tap */}
       {isOpen && (
-        <div className="fixed inset-0 z-40 bg-slate-900/40 md:hidden" onClick={onClose} />
+        <div className="fixed inset-0 z-40 bg-pink-100 md:hidden" onClick={onClose} />
       )}
 
       <aside className={`
@@ -80,10 +80,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 key={item.id}
                 onClick={() => { onSelectTab(item.id); onClose(); }}
-                className={`w-full flex items-center justify-between px-3.5 py-3 md:py-2.5 rounded-2xl text-sm md:text-xs font-bold transition-all ${
+                className={`w-full flex items-center justify-between px-3.5 py-3 md:py-2.5 rounded-2xl text-sm md:text-xs font-extrabold transition-all ${
                   isActive
-                    ? 'bg-white text-[#FF2D85] shadow-sm font-extrabold'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                    ? 'bg-white text-[#FF2D85] shadow-sm'
+                    : 'text-slate-800 hover:text-slate-900 hover:bg-white/60'
                 }`}
               >
                 <div className="flex items-center gap-3">
