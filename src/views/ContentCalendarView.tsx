@@ -62,11 +62,45 @@ function weekOffsetForDate(iso: string): number {
   return Math.round(diffDays / 7);
 }
 
+// The first of the displayed month, N months from the current one.
+function getMonthStart(offset: number): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth() + offset, 1);
+}
+
+// Builds a Monday-start grid covering the whole month plus whatever leading/
+// trailing days from neighbouring months fill out the first and last weeks,
+// so every row has a full 7 days.
+function getMonthGrid(monthStart: Date): { iso: string; dayNum: number; inMonth: boolean }[] {
+  const year = monthStart.getFullYear();
+  const month = monthStart.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const firstWeekday = firstDay.getDay(); // 0 = Sun
+  const leadingDays = firstWeekday === 0 ? 6 : firstWeekday - 1;
+
+  const gridStart = new Date(firstDay);
+  gridStart.setDate(firstDay.getDate() - leadingDays);
+
+  const lastDay = new Date(year, month + 1, 0);
+  const lastWeekday = lastDay.getDay();
+  const trailingDays = lastWeekday === 0 ? 0 : 7 - lastWeekday;
+  const totalDays = leadingDays + lastDay.getDate() + trailingDays;
+
+  return Array.from({ length: totalDays }, (_, i) => {
+    const d = new Date(gridStart);
+    d.setDate(gridStart.getDate() + i);
+    return { iso: toISODate(d), dayNum: d.getDate(), inMonth: d.getMonth() === month };
+  });
+}
+
 export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
   posts, onCreatePost, onSubmitForReview, onApprovePost, onPublishNow, onRequestChanges, onDeleteDraft
 }) => {
   const [filterPlatform, setFilterPlatform] = useState<string>("all");
+  const [viewMode, setViewMode] = useState<'week' | 'month'>('month');
   const [weekOffset, setWeekOffset] = useState(0);
+  const [monthOffset, setMonthOffset] = useState(0);
+  const [expandedDay, setExpandedDay] = useState<string | null>(null);
   const [detectedEvents, setDetectedEvents] = useState<DetectedEvent[]>([]);
   const [detectedStatus, setDetectedStatus] = useState<'idle' | 'loading' | 'ready' | 'not_connected' | 'error'>('idle');
   const [addedEventIds, setAddedEventIds] = useState<Set<string>>(new Set());
@@ -109,6 +143,10 @@ export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
     };
   });
   const weekEnd = days[6];
+
+  const monthStart = getMonthStart(monthOffset);
+  const monthGrid = getMonthGrid(monthStart);
+  const monthLabel = monthStart.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
   const loadDetectedEvents = async () => {
     const token = localStorage.getItem('pinkku_token');
@@ -321,36 +359,69 @@ export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
         </div>
       )}
 
-      {/* Week Navigator & Filters */}
+      {/* Navigator & Filters */}
       <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200/80 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1">
-            <button onClick={() => setWeekOffset(w => w - 1)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-600">
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <span className="text-xs font-black text-slate-800">
-              {days[0].date} – {weekEnd.date}, {weekStart.getFullYear()}
-            </span>
-            <button onClick={() => setWeekOffset(w => w + 1)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-600">
-              <ChevronRight className="w-4 h-4" />
-            </button>
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Week / Month toggle */}
+          <div className="flex items-center gap-0.5 p-0.5 rounded-xl bg-slate-100">
+            {(['week', 'month'] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold capitalize transition-all ${
+                  viewMode === mode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                {mode}
+              </button>
+            ))}
           </div>
-          {weekOffset !== 0 && (
-            <button
-              onClick={() => setWeekOffset(0)}
-              className="text-[11px] font-bold text-[#FF2D85] hover:underline"
-            >
-              Today
-            </button>
+
+          {viewMode === 'week' ? (
+            <>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setWeekOffset(w => w - 1)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-600">
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="text-xs font-black text-slate-800">
+                  {days[0].date} – {weekEnd.date}, {weekStart.getFullYear()}
+                </span>
+                <button onClick={() => setWeekOffset(w => w + 1)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-600">
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+              {weekOffset !== 0 && (
+                <button onClick={() => setWeekOffset(0)} className="text-[11px] font-bold text-[#FF2D85] hover:underline">
+                  Today
+                </button>
+              )}
+              <input
+                type="date"
+                value={days[0].iso}
+                onChange={(e) => e.target.value && setWeekOffset(weekOffsetForDate(e.target.value))}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-[11px] font-bold text-slate-600"
+                title="Jump to date"
+              />
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setMonthOffset(m => m - 1)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-600">
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="text-xs font-black text-slate-800">{monthLabel}</span>
+                <button onClick={() => setMonthOffset(m => m + 1)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-600">
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+              {monthOffset !== 0 && (
+                <button onClick={() => setMonthOffset(0)} className="text-[11px] font-bold text-[#FF2D85] hover:underline">
+                  Today
+                </button>
+              )}
+            </>
           )}
-          <input
-            type="date"
-            value={days[0].iso}
-            onChange={(e) => e.target.value && setWeekOffset(weekOffsetForDate(e.target.value))}
-            className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-[11px] font-bold text-slate-600"
-            title="Jump to date"
-          />
         </div>
 
         {/* Channel Filter Pills */}
@@ -371,7 +442,90 @@ export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
         </div>
       </div>
 
+      {viewMode === 'month' && (
+        <div className="bg-white rounded-3xl p-3 sm:p-4 border border-slate-200/80 shadow-sm">
+          <div className="grid grid-cols-7 gap-1 mb-1">
+            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+              <div key={d} className="text-center text-[10px] font-black text-slate-400 uppercase py-1.5">{d}</div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {monthGrid.map((cell) => {
+              const cellPosts = filteredPosts.filter(p => p.scheduledDate === cell.iso);
+              const cellEvents = detectedEvents.filter(e => e.date === cell.iso);
+              const isToday = cell.iso === todayISO;
+              const isExpanded = expandedDay === cell.iso;
+              const visiblePosts = isExpanded ? cellPosts : cellPosts.slice(0, 2);
+              const hiddenCount = cellPosts.length - visiblePosts.length;
+
+              return (
+                <div
+                  key={cell.iso}
+                  className={`min-h-[92px] p-1.5 rounded-xl border flex flex-col gap-1 ${
+                    !cell.inMonth ? 'bg-slate-50/40 border-slate-100' :
+                    isToday ? 'border-[#FF2D85] ring-1 ring-pink-500/20 bg-pink-50/20' : 'border-slate-200/70'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className={`text-[11px] font-black ${!cell.inMonth ? 'text-slate-300' : isToday ? 'text-[#FF2D85]' : 'text-slate-600'}`}>
+                      {cell.dayNum}
+                    </span>
+                    {cellEvents.length > 0 && <Mail className="w-2.5 h-2.5 text-indigo-400" />}
+                  </div>
+
+                  <div className="space-y-1 flex-1">
+                    {visiblePosts.map((post) => {
+                      const anyFailed = post.targets?.some(t => t.status === 'failed');
+                      const anyPublished = post.targets?.some(t => t.status === 'published');
+                      return (
+                        <div
+                          key={post.id}
+                          title={post.title}
+                          className={`px-1.5 py-1 rounded-md text-[9px] font-bold truncate ${
+                            anyFailed ? 'bg-rose-100 text-rose-700' :
+                            anyPublished ? 'bg-emerald-100 text-emerald-800' :
+                            'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          {post.title}
+                        </div>
+                      );
+                    })}
+                    {hiddenCount > 0 && (
+                      <button
+                        onClick={() => setExpandedDay(cell.iso)}
+                        className="text-[9px] font-bold text-slate-400 hover:text-[#FF2D85]"
+                      >
+                        +{hiddenCount} more
+                      </button>
+                    )}
+                    {isExpanded && cellPosts.length > 2 && (
+                      <button
+                        onClick={() => setExpandedDay(null)}
+                        className="text-[9px] font-bold text-slate-400 hover:text-[#FF2D85]"
+                      >
+                        Show less
+                      </button>
+                    )}
+                  </div>
+
+                  {cell.inMonth && (
+                    <button
+                      onClick={onCreatePost}
+                      className="text-[9px] font-bold text-slate-300 hover:text-[#FF2D85] text-left"
+                    >
+                      + Schedule
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* 7-Day Grid */}
+      {viewMode === 'week' && (
       <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
         {days.map((d) => {
           const dayPosts = filteredPosts.filter(p => p.scheduledDate === d.iso);
@@ -493,6 +647,7 @@ export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
           );
         })}
       </div>
+      )}
 
     </div>
   );
