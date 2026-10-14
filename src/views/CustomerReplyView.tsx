@@ -79,6 +79,7 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
   const [orders, setOrders] = useState<OrderEntry[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [engageTab, setEngageTab] = useState<'dm' | 'comments'>('dm');
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [inboxPlatform, setInboxPlatform] = useState<string>('all');
 
   const loadOrders = async () => {
@@ -321,6 +322,60 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
         </div>
       </div>
 
+      {/* Direct Messages / Comments tabs — Comments has no real data source
+          yet (would need each platform's own post-comments API), so it's
+          shown as a clearly-labeled coming-soon panel rather than faked. */}
+      <div className="flex items-center gap-1 p-1 rounded-2xl bg-slate-100 w-fit">
+        <button
+          onClick={() => setEngageTab('dm')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            engageTab === 'dm' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          Direct Messages
+        </button>
+        <button
+          onClick={() => setEngageTab('comments')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            engageTab === 'comments' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          Comments
+        </button>
+        <button
+          onClick={() => onSelectTab('gmail')}
+          className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-700 transition-all"
+        >
+          Email
+        </button>
+      </div>
+
+      {engageTab === 'comments' && (
+        <div className="bg-white rounded-3xl p-10 border border-slate-200/80 shadow-sm text-center space-y-2">
+          <MessageSquare className="w-8 h-8 text-slate-300 mx-auto" />
+          <p className="text-sm font-black text-slate-700">Comments — coming soon</p>
+          <p className="text-xs text-slate-400 font-medium max-w-sm mx-auto">
+            Replying to public comments on your Facebook/Instagram posts from here isn't wired up yet — for now, Smart Engage handles Direct Messages (Telegram &amp; Messenger).
+          </p>
+        </div>
+      )}
+
+      {engageTab === 'dm' && (
+      <>
+      {/* Engage Settings — condensed behind a toggle so the inbox/orders
+          below isn't pushed far down the page by these per-platform cards. */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm">
+        <button
+          onClick={() => setSettingsOpen(o => !o)}
+          className="w-full flex items-center justify-between p-3.5 text-left"
+        >
+          <span className="text-xs font-black text-slate-700">Engage Settings</span>
+          <span className="text-[11px] font-bold text-slate-400">{settingsOpen ? 'Hide ▲' : 'Show ▼'}</span>
+        </button>
+      </div>
+
+      {settingsOpen && (
+      <>
       {telegramLink && (
         <div className="bg-sky-50 border border-sky-200 rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
           <div className="flex items-center gap-2 text-xs font-bold text-sky-800 min-w-0">
@@ -486,47 +541,9 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
           <p className="text-[11px] text-slate-400 font-medium">Limit reached — delete one above to add another.</p>
         )}
       </div>
-
-      {/* Direct Messages / Comments tabs — Comments has no real data source
-          yet (would need each platform's own post-comments API), so it's
-          shown as a clearly-labeled coming-soon panel rather than faked. */}
-      <div className="flex items-center gap-1 p-1 rounded-2xl bg-slate-100 w-fit">
-        <button
-          onClick={() => setEngageTab('dm')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            engageTab === 'dm' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          Direct Messages
-        </button>
-        <button
-          onClick={() => setEngageTab('comments')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            engageTab === 'comments' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          Comments
-        </button>
-        <button
-          onClick={() => onSelectTab('gmail')}
-          className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-700 transition-all"
-        >
-          Email
-        </button>
-      </div>
-
-      {engageTab === 'comments' && (
-        <div className="bg-white rounded-3xl p-10 border border-slate-200/80 shadow-sm text-center space-y-2">
-          <MessageSquare className="w-8 h-8 text-slate-300 mx-auto" />
-          <p className="text-sm font-black text-slate-700">Comments — coming soon</p>
-          <p className="text-xs text-slate-400 font-medium max-w-sm mx-auto">
-            Replying to public comments on your Facebook/Instagram posts from here isn't wired up yet — for now, Smart Engage handles Direct Messages (Telegram &amp; Messenger).
-          </p>
-        </div>
+      </>
       )}
 
-      {engageTab === 'dm' && (
-      <>
       {/* Orders — fulfillment details (phone/address) the AI pulled out of a
           customer chat, so they don't have to be dug out of message history. */}
       {orders.length > 0 && (
