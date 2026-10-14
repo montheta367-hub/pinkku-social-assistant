@@ -52,7 +52,7 @@ export const PinkkuWebDiagram: React.FC<PinkkuWebDiagramProps> = ({ variant = 'h
 
       {/* spokes */}
       {NODES.map((n) => (
-        <line key={`spoke-${n.id}`} x1={300} y1={300} x2={n.x} y2={n.y} stroke="#FCA5C7" strokeWidth={1.3} opacity={0.55} />
+        <line key={`spoke-${n.id}`} x1={300} y1={300} x2={n.x} y2={n.y} stroke="#FF6FA5" strokeWidth={2.5} opacity={0.9} />
       ))}
 
       {/* extra dashed "room to grow" legs — Pinkku isn't limited to 5 apps */}
