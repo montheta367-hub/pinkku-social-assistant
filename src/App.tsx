@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { Menu } from 'lucide-react';
 import { UserProfile, PlatformConnection, SocialPost, CustomerMessage } from './types';
 import { guestUserProfile, initialConnections, initialPosts, initialMessages, emptyConnections } from './mockData';
 import { Navbar } from './components/Navbar';
@@ -35,7 +34,6 @@ export const App: React.FC = () => {
   });
 
   const [currentTab, setCurrentTab] = useState<TabType>('dashboard');
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   // The seeded showcase account (amonthet5@gmail.com) gets the demo data via
   // handleLoginSuccess below; every other account starts clean — real data
   // loads in from the backend once logged in, not fabricated numbers.
@@ -409,18 +407,7 @@ export const App: React.FC = () => {
           onSelectTab={setCurrentTab}
           unreadMessagesCount={unreadMessagesCount}
           connections={connections}
-          isOpen={sidebarOpen}
-          onClose={() => setSidebarOpen(false)}
         />
-
-        {/* Mobile/tablet menu toggle — sidebar is an off-canvas drawer below md */}
-        <button
-          onClick={() => setSidebarOpen(true)}
-          className="md:hidden flex items-center gap-2 mx-4 mt-4 px-3.5 py-2 rounded-xl bg-white border border-pink-200/70 text-slate-700 font-bold text-xs shadow-sm w-fit"
-        >
-          <Menu className="w-4 h-4" />
-          <span>Menu</span>
-        </button>
 
         <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
           {currentTab === 'dashboard' && (

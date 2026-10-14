@@ -5,8 +5,7 @@ import {
   Calendar,
   MessageSquare,
   BarChart3,
-  Settings,
-  X
+  Settings
 } from 'lucide-react';
 import pinkkuIcon from '../assets/pinkku-icon.png';
 import { PlatformConnection } from '../types';
@@ -27,17 +26,13 @@ interface SidebarProps {
   onSelectTab: (tab: TabType) => void;
   unreadMessagesCount: number;
   connections: PlatformConnection[];
-  isOpen: boolean;
-  onClose: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   currentTab,
   onSelectTab,
   unreadMessagesCount,
-  connections,
-  isOpen,
-  onClose
+  connections
 }) => {
   const connectedCount = connections.filter(c => c.connected).length;
   const menuItems = [
@@ -50,20 +45,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   return (
-    <aside
-      className={`
-        ${isOpen ? 'flex' : 'hidden'} md:flex
-        w-full md:w-64 shrink-0 bg-pink-50 border-r border-pink-200/70 p-4 space-y-6 flex-col justify-between
-      `}
-    >
+    <aside className="flex w-full md:w-64 shrink-0 bg-pink-50 border-r border-pink-200/70 p-4 space-y-6 flex-col justify-between">
       <div className="space-y-1">
-        <div className="flex items-center justify-between px-3 py-2">
+        <div className="px-3 py-2">
           <span className="text-xs md:text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
             Management
           </span>
-          <button onClick={onClose} className="md:hidden p-1 rounded-lg hover:bg-white/60 text-slate-500">
-            <X className="w-4 h-4" />
-          </button>
         </div>
 
         <nav className="space-y-1">
@@ -74,7 +61,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             return (
               <button
                 key={item.id}
-                onClick={() => { onSelectTab(item.id); onClose(); }}
+                onClick={() => onSelectTab(item.id)}
                 className={`w-full flex items-center justify-between px-3.5 py-3 md:py-2.5 rounded-2xl text-sm md:text-xs font-extrabold transition-all ${
                   isActive
                     ? 'bg-white text-[#FF2D85] shadow-sm'
