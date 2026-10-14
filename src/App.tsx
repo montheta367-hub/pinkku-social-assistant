@@ -401,7 +401,7 @@ export const App: React.FC = () => {
       )}
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col md:flex-row max-w-7xl w-full mx-auto">
+      <div className="relative flex-1 flex flex-col md:flex-row max-w-7xl w-full mx-auto">
         <Sidebar
           currentTab={currentTab}
           onSelectTab={setCurrentTab}
