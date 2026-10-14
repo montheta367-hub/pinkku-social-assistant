@@ -745,6 +745,34 @@ export const ContentCalendarView: React.FC<ContentCalendarViewProps> = ({
                   </div>
                 </div>
               )}
+
+              {selectedPost.mediaUrl && (
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 mb-1.5">Attached media</p>
+                  <img src={selectedPost.mediaUrl} alt="" className="w-full max-h-48 object-cover rounded-xl border border-slate-200/70" />
+                </div>
+              )}
+
+              {selectedPost.status === 'pending_review' && (
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100">
+                  <button
+                    onClick={() => { onRequestChanges(selectedPost.id); setSelectedPost(null); }}
+                    className="px-3.5 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-bold flex items-center gap-1.5"
+                  >
+                    <Undo2 className="w-3.5 h-3.5" /> Request changes
+                  </button>
+                  <button
+                    onClick={() => {
+                      const sched = scheduleFor(selectedPost.id);
+                      onApprovePost(selectedPost.id, sched.date, sched.time);
+                      setSelectedPost(null);
+                    }}
+                    className="flex-1 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center justify-center gap-1.5"
+                  >
+                    <Check className="w-3.5 h-3.5" /> Approve &amp; Schedule
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         );
