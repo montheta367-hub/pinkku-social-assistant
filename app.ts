@@ -2746,82 +2746,136 @@ app.patch('/api/orders/:id', requireAuth, async (req: AuthedRequest, res) => {
 // which needs Advanced Access we don't have yet — see the Facebook
 // Business Verification notes elsewhere in this file).
 // ---------------------------------------------------------------------------
-app.get('/api/report/summary', requireAuth, async (req: AuthedRequest, res) => {
-  const userId = req.user!.id;
-
-  const platformParam = typeof req.query.platform === 'string' ? req.query.platform : 'all';
-  const platform = platformParam && platformParam !== 'all' ? platformParam : null;
-  const days = Math.min(365, Math.max(1, parseInt(String(req.query.days || '30'), 10) || 30));
+async function computeReportSummary(userId: string, platform: string | null, days: number) {
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-
   const platformClause = platform ? ' AND platform = $3' : '';
   const filterParams = platform ? [userId, since, platform] : [userId, since];
 
+  const [postTargets, messages, orders, postsByPlatform] = await Promise.all([
+    pool.query(
+      `SELECT status, COUNT(*)::int AS count FROM post_targets WHERE user_id = $1 AND created_at >= $2${platformClause} GROUP BY status`,
+      filterParams
+    ),
+    pool.query(
+      `SELECT
+         COUNT(*)::int AS total,
+         COUNT(*) FILTER (WHERE status = 'replied')::int AS replied,
+         COUNT(*) FILTER (WHERE platform = 'telegram')::int AS telegram,
+         COUNT(*) FILTER (WHERE platform = 'facebook')::int AS facebook
+       FROM customer_messages WHERE user_id = $1 AND created_at >= $2${platformClause}`,
+      filterParams
+    ),
+    pool.query(
+      `SELECT
+         COUNT(*)::int AS total,
+         COUNT(*) FILTER (WHERE status = 'fulfilled')::int AS fulfilled
+       FROM orders WHERE user_id = $1 AND created_at >= $2${platformClause}`,
+      filterParams
+    ),
+    pool.query(
+      `SELECT platform, status, COUNT(*)::int AS count FROM post_targets WHERE user_id = $1 AND created_at >= $2 GROUP BY platform, status`,
+      [userId, since]
+    ),
+  ]);
+
+  const targetsByStatus: Record<string, number> = {};
+  for (const row of postTargets.rows) targetsByStatus[row.status] = row.count;
+
+  const platformBreakdown: Record<string, { published: number; failed: number; pending: number }> = {};
+  for (const row of postsByPlatform.rows) {
+    if (!platformBreakdown[row.platform]) platformBreakdown[row.platform] = { published: 0, failed: 0, pending: 0 };
+    if (row.status === 'published') platformBreakdown[row.platform].published = row.count;
+    else if (row.status === 'failed') platformBreakdown[row.platform].failed = row.count;
+    else platformBreakdown[row.platform].pending += row.count;
+  }
+
+  const msgRow = messages.rows[0] || { total: 0, replied: 0, telegram: 0, facebook: 0 };
+  const orderRow = orders.rows[0] || { total: 0, fulfilled: 0 };
+
+  return {
+    period: { since, days, platform: platform || 'all' },
+    posts: {
+      published: targetsByStatus.published || 0,
+      failed: targetsByStatus.failed || 0,
+      pending: targetsByStatus.pending || 0,
+      byPlatform: platformBreakdown,
+    },
+    messages: {
+      total: msgRow.total,
+      replied: msgRow.replied,
+      replyRate: msgRow.total > 0 ? Math.round((msgRow.replied / msgRow.total) * 100) : 0,
+      byPlatform: { telegram: msgRow.telegram, facebook: msgRow.facebook },
+    },
+    orders: {
+      total: orderRow.total,
+      fulfilled: orderRow.fulfilled,
+      new: orderRow.total - orderRow.fulfilled,
+    },
+  };
+}
+
+function parseReportFilters(req: AuthedRequest) {
+  const platformParam = typeof req.query.platform === 'string' ? req.query.platform : 'all';
+  const platform = platformParam && platformParam !== 'all' ? platformParam : null;
+  const days = Math.min(365, Math.max(1, parseInt(String(req.query.days || '30'), 10) || 30));
+  return { platform, days };
+}
+
+app.get('/api/report/summary', requireAuth, async (req: AuthedRequest, res) => {
+  const { platform, days } = parseReportFilters(req);
   try {
-    const [postTargets, messages, orders, postsByPlatform] = await Promise.all([
-      pool.query(
-        `SELECT status, COUNT(*)::int AS count FROM post_targets WHERE user_id = $1 AND created_at >= $2${platformClause} GROUP BY status`,
-        filterParams
-      ),
-      pool.query(
-        `SELECT
-           COUNT(*)::int AS total,
-           COUNT(*) FILTER (WHERE status = 'replied')::int AS replied,
-           COUNT(*) FILTER (WHERE platform = 'telegram')::int AS telegram,
-           COUNT(*) FILTER (WHERE platform = 'facebook')::int AS facebook
-         FROM customer_messages WHERE user_id = $1 AND created_at >= $2${platformClause}`,
-        filterParams
-      ),
-      pool.query(
-        `SELECT
-           COUNT(*)::int AS total,
-           COUNT(*) FILTER (WHERE status = 'fulfilled')::int AS fulfilled
-         FROM orders WHERE user_id = $1 AND created_at >= $2${platformClause}`,
-        filterParams
-      ),
-      pool.query(
-        `SELECT platform, status, COUNT(*)::int AS count FROM post_targets WHERE user_id = $1 AND created_at >= $2 GROUP BY platform, status`,
-        [userId, since]
-      ),
-    ]);
-
-    const targetsByStatus: Record<string, number> = {};
-    for (const row of postTargets.rows) targetsByStatus[row.status] = row.count;
-
-    const platformBreakdown: Record<string, { published: number; failed: number; pending: number }> = {};
-    for (const row of postsByPlatform.rows) {
-      if (!platformBreakdown[row.platform]) platformBreakdown[row.platform] = { published: 0, failed: 0, pending: 0 };
-      if (row.status === 'published') platformBreakdown[row.platform].published = row.count;
-      else if (row.status === 'failed') platformBreakdown[row.platform].failed = row.count;
-      else platformBreakdown[row.platform].pending += row.count;
-    }
-
-    const msgRow = messages.rows[0] || { total: 0, replied: 0, telegram: 0, facebook: 0 };
-    const orderRow = orders.rows[0] || { total: 0, fulfilled: 0 };
-
-    return res.json({
-      period: { since, days, platform: platform || 'all' },
-      posts: {
-        published: targetsByStatus.published || 0,
-        failed: targetsByStatus.failed || 0,
-        pending: targetsByStatus.pending || 0,
-        byPlatform: platformBreakdown,
-      },
-      messages: {
-        total: msgRow.total,
-        replied: msgRow.replied,
-        replyRate: msgRow.total > 0 ? Math.round((msgRow.replied / msgRow.total) * 100) : 0,
-        byPlatform: { telegram: msgRow.telegram, facebook: msgRow.facebook },
-      },
-      orders: {
-        total: orderRow.total,
-        fulfilled: orderRow.fulfilled,
-        new: orderRow.total - orderRow.fulfilled,
-      },
-    });
+    const summary = await computeReportSummary(req.user!.id, platform, days);
+    return res.json(summary);
   } catch (err) {
     console.error('[report] summary error:', err);
     return res.status(500).json({ error: 'Could not load report data.' });
+  }
+});
+
+// AI-generated observations grounded strictly in the real numbers from
+// computeReportSummary — the prompt explicitly forbids inventing metrics
+// (engagement %, audience active hours, view counts) that Pinkku doesn't
+// actually track, so this stays honest rather than mimicking fake "AI
+// insight" demos that cite numbers no one measured.
+app.get('/api/report/insights', requireAuth, async (req: AuthedRequest, res) => {
+  const { platform, days } = parseReportFilters(req);
+  try {
+    const summary = await computeReportSummary(req.user!.id, platform, days);
+    const hasData = summary.posts.published + summary.posts.failed + summary.messages.total + summary.orders.total > 0;
+    if (!hasData) {
+      return res.json({ insights: [] });
+    }
+
+    const apiKey = await resolveGeminiApiKey(req.user!.id);
+    if (!apiKey) {
+      return res.json({ insights: [] });
+    }
+
+    const ai = getGemini(apiKey);
+    const prompt = `You are analyzing REAL performance data for a Myanmar small business using Pinkku (a social media + customer-reply assistant). Here is their actual data for the last ${days} days${platform ? ` on ${platform}` : ''}:
+
+Posts: ${summary.posts.published} published, ${summary.posts.failed} failed, ${summary.posts.pending} pending.
+Posts by platform: ${JSON.stringify(summary.posts.byPlatform)}
+Customer messages: ${summary.messages.total} total, ${summary.messages.replied} replied (${summary.messages.replyRate}% reply rate). By platform: Telegram ${summary.messages.byPlatform.telegram}, Facebook ${summary.messages.byPlatform.facebook}.
+Orders: ${summary.orders.total} captured, ${summary.orders.fulfilled} fulfilled, ${summary.orders.new} still new/unfulfilled.
+
+Write 2-3 short, genuinely useful observations and suggestions based ONLY on these real numbers above. Do NOT invent engagement rates, audience active hours, view counts, or any metric not listed above — only reference what's given. Skip a category entirely if its numbers are zero or too thin to say anything useful, rather than making something up.
+
+Output strictly a JSON object:
+{"insights": [{"title": "short label, 2-4 words", "description": "one concise, specific sentence grounded only in the numbers above"}]}`;
+
+    const response = await generateContentWithRetry(ai, {
+      model: 'gemini-flash-lite-latest',
+      contents: prompt,
+      config: { responseMimeType: 'application/json' },
+    });
+
+    const parsed = JSON.parse(response.text);
+    const insights = Array.isArray(parsed.insights) ? parsed.insights.slice(0, 4) : [];
+    return res.json({ insights });
+  } catch (err) {
+    console.error('[report] insights error:', err);
+    return res.json({ insights: [] });
   }
 });
 

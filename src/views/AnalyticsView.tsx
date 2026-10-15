@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { BarChart3, MessageSquare, Send, Package, CheckCircle2, Download } from 'lucide-react';
+import { BarChart3, MessageSquare, Send, Package, CheckCircle2, Download, Sparkles } from 'lucide-react';
 import { PlatformLogo } from '../components/PlatformLogo';
+import pinkkuIcon from '../assets/pinkku-icon.png';
+
+interface ReportInsight {
+  title: string;
+  description: string;
+}
 
 interface ReportSummary {
   period: { since: string; days: number; platform: string };
@@ -39,6 +45,8 @@ export const AnalyticsView: React.FC = () => {
   const [error, setError] = useState('');
   const [platform, setPlatform] = useState('all');
   const [days, setDays] = useState(30);
+  const [insights, setInsights] = useState<ReportInsight[]>([]);
+  const [insightsLoading, setInsightsLoading] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem('pinkku_token');
@@ -49,6 +57,14 @@ export const AnalyticsView: React.FC = () => {
       .then(d => { setData(d); setError(''); })
       .catch(() => setError('Could not load report data.'))
       .finally(() => setLoading(false));
+
+    setInsights([]);
+    setInsightsLoading(true);
+    fetch(`/api/report/insights?platform=${platform}&days=${days}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => (res.ok ? res.json() : { insights: [] }))
+      .then(d => setInsights(d.insights || []))
+      .catch(() => setInsights([]))
+      .finally(() => setInsightsLoading(false));
   }, [platform, days]);
 
   const platforms = data ? Object.keys(data.posts.byPlatform) : [];
@@ -201,6 +217,37 @@ export const AnalyticsView: React.FC = () => {
             </div>
 
           </div>
+
+          {/* AI Learning — Gemini-written observations grounded strictly in
+              the real numbers above (see the /api/report/insights prompt);
+              hidden entirely if there's no real data or no suggestions. */}
+          {(insightsLoading || insights.length > 0) && (
+            <div className="rounded-3xl bg-gradient-to-br from-slate-900 to-slate-800 text-white p-6 sm:p-7 space-y-5 shadow-sm">
+              <div className="flex items-center gap-3">
+                <img src={pinkkuIcon} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
+                <div>
+                  <span className="text-[11px] font-black tracking-wider text-pink-400 uppercase">Pinkku AI Learning</span>
+                  <h3 className="text-lg sm:text-xl font-black leading-snug">Your real numbers, explained.</h3>
+                </div>
+              </div>
+
+              {insightsLoading ? (
+                <p className="text-xs text-slate-400 font-medium">Looking at your numbers…</p>
+              ) : (
+                <div className="divide-y divide-white/10">
+                  {insights.map((insight, i) => (
+                    <div key={i} className="py-3.5 first:pt-0 last:pb-0 flex items-start gap-3">
+                      <Sparkles className="w-4 h-4 text-pink-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-black">{insight.title}</p>
+                        <p className="text-xs text-slate-300 font-medium mt-0.5">{insight.description}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Messages by Platform — single metric (count), so one consistent
               brand hue per bar; the platform icon already carries identity,
