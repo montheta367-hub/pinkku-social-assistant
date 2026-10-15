@@ -389,7 +389,7 @@ export const App: React.FC = () => {
           <div className={`px-4 sm:px-6 py-2.5 text-xs font-bold flex items-center justify-between gap-3 ${
             connectNotice.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-b border-emerald-200' : 'bg-rose-50 text-rose-800 border-b border-rose-200'
           }`}>
-            <span className="max-w-7xl w-full mx-auto flex-1">{connectNotice.message}</span>
+            <span className="w-full flex-1">{connectNotice.message}</span>
             <button
               onClick={() => setConnectNotice(null)}
               className="opacity-60 hover:opacity-100 transition-opacity"
@@ -401,7 +401,7 @@ export const App: React.FC = () => {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col md:flex-row max-w-7xl w-full mx-auto md:overflow-hidden">
+      <div className="flex-1 flex flex-col md:flex-row w-full md:overflow-hidden">
         <Sidebar
           currentTab={currentTab}
           onSelectTab={setCurrentTab}

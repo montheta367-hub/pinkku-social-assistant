@@ -20,7 +20,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   return (
     <header className="bg-white/90 backdrop-blur-md border-b border-slate-200/80 px-4 sm:px-6 py-3">
-      <div className="flex items-center justify-between max-w-7xl mx-auto">
+      <div className="flex items-center justify-between w-full">
         
         {/* Brand Logo */}
         <div className="flex items-center gap-3">
