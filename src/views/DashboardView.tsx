@@ -199,7 +199,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       />
 
       {/* Content & Messages 2-Column Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         
         {/* Recent Posts & Schedule */}
         <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm space-y-4">
