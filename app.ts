@@ -2748,11 +2748,20 @@ app.patch('/api/orders/:id', requireAuth, async (req: AuthedRequest, res) => {
 // ---------------------------------------------------------------------------
 app.get('/api/report/summary', requireAuth, async (req: AuthedRequest, res) => {
   const userId = req.user!.id;
+
+  const platformParam = typeof req.query.platform === 'string' ? req.query.platform : 'all';
+  const platform = platformParam && platformParam !== 'all' ? platformParam : null;
+  const days = Math.min(365, Math.max(1, parseInt(String(req.query.days || '30'), 10) || 30));
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  const platformClause = platform ? ' AND platform = $3' : '';
+  const filterParams = platform ? [userId, since, platform] : [userId, since];
+
   try {
     const [postTargets, messages, orders, postsByPlatform] = await Promise.all([
       pool.query(
-        `SELECT status, COUNT(*)::int AS count FROM post_targets WHERE user_id = $1 GROUP BY status`,
-        [userId]
+        `SELECT status, COUNT(*)::int AS count FROM post_targets WHERE user_id = $1 AND created_at >= $2${platformClause} GROUP BY status`,
+        filterParams
       ),
       pool.query(
         `SELECT
@@ -2760,19 +2769,19 @@ app.get('/api/report/summary', requireAuth, async (req: AuthedRequest, res) => {
            COUNT(*) FILTER (WHERE status = 'replied')::int AS replied,
            COUNT(*) FILTER (WHERE platform = 'telegram')::int AS telegram,
            COUNT(*) FILTER (WHERE platform = 'facebook')::int AS facebook
-         FROM customer_messages WHERE user_id = $1`,
-        [userId]
+         FROM customer_messages WHERE user_id = $1 AND created_at >= $2${platformClause}`,
+        filterParams
       ),
       pool.query(
         `SELECT
            COUNT(*)::int AS total,
            COUNT(*) FILTER (WHERE status = 'fulfilled')::int AS fulfilled
-         FROM orders WHERE user_id = $1`,
-        [userId]
+         FROM orders WHERE user_id = $1 AND created_at >= $2${platformClause}`,
+        filterParams
       ),
       pool.query(
-        `SELECT platform, status, COUNT(*)::int AS count FROM post_targets WHERE user_id = $1 GROUP BY platform, status`,
-        [userId]
+        `SELECT platform, status, COUNT(*)::int AS count FROM post_targets WHERE user_id = $1 AND created_at >= $2 GROUP BY platform, status`,
+        [userId, since]
       ),
     ]);
 
@@ -2791,6 +2800,7 @@ app.get('/api/report/summary', requireAuth, async (req: AuthedRequest, res) => {
     const orderRow = orders.rows[0] || { total: 0, fulfilled: 0 };
 
     return res.json({
+      period: { since, days, platform: platform || 'all' },
       posts: {
         published: targetsByStatus.published || 0,
         failed: targetsByStatus.failed || 0,
