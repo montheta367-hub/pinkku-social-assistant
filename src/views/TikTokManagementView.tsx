@@ -292,7 +292,7 @@ export const TikTokManagementView: React.FC<TikTokManagementViewProps> = ({ user
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => onSelectTab('creator')}
             className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-[#FF2D85] text-white font-extrabold text-xs shadow-md shadow-pink-500/25 flex items-center gap-2"
