@@ -116,6 +116,18 @@ export const App: React.FC = () => {
     }
   };
 
+  const triggerTestNotification = () => {
+    setNewMessageToast({
+      id: `test-${Date.now()}`,
+      customerName: 'Test Customer',
+      platform: 'telegram',
+      message: 'This is a sample message — if you can see and hear this, notifications are working!',
+      timestamp: new Date().toISOString(),
+      status: 'unread',
+    });
+    playNotificationSound();
+  };
+
   const loadMessages = async () => {
     const token = localStorage.getItem('pinkku_token');
     if (!token) return;
@@ -523,6 +535,7 @@ export const App: React.FC = () => {
               messages={messages}
               onUpdateMessage={handleUpdateMessage}
               onSelectTab={setCurrentTab}
+              onTestNotification={triggerTestNotification}
             />
           )}
 

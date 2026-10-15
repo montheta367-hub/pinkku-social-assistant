@@ -28,6 +28,7 @@ interface CustomerReplyViewProps {
   messages: CustomerMessage[];
   onUpdateMessage: (id: string, replyText: string) => void;
   onSelectTab: (tab: TabType) => void;
+  onTestNotification: () => void;
 }
 
 interface FaqEntry {
@@ -55,7 +56,8 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
   user,
   messages,
   onUpdateMessage,
-  onSelectTab
+  onSelectTab,
+  onTestNotification
 }) => {
   const [selectedMsgId, setSelectedMsgId] = useState<string>(messages[0]?.id || "");
   const [activeReply, setActiveReply] = useState<string>("");
@@ -325,28 +327,38 @@ export const CustomerReplyView: React.FC<CustomerReplyViewProps> = ({
       {/* Direct Messages / Comments tabs — Comments has no real data source
           yet (would need each platform's own post-comments API), so it's
           shown as a clearly-labeled coming-soon panel rather than faked. */}
-      <div className="flex items-center gap-1 p-1 rounded-2xl bg-slate-100 w-fit">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-1 p-1 rounded-2xl bg-slate-100 w-fit">
+          <button
+            onClick={() => setEngageTab('dm')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+              engageTab === 'dm' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            Direct Messages
+          </button>
+          <button
+            onClick={() => setEngageTab('comments')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+              engageTab === 'comments' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            Comments
+          </button>
+          <button
+            onClick={() => onSelectTab('gmail')}
+            className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-700 transition-all"
+          >
+            Email
+          </button>
+        </div>
+
         <button
-          onClick={() => setEngageTab('dm')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            engageTab === 'dm' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-          }`}
+          onClick={onTestNotification}
+          title="Fire a sample toast + sound so you can confirm notifications are working"
+          className="px-3.5 py-2 rounded-xl border border-slate-200 hover:border-pink-300 hover:bg-pink-50 text-slate-600 hover:text-[#FF2D85] text-xs font-bold transition-all flex items-center gap-1.5"
         >
-          Direct Messages
-        </button>
-        <button
-          onClick={() => setEngageTab('comments')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-            engageTab === 'comments' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          Comments
-        </button>
-        <button
-          onClick={() => onSelectTab('gmail')}
-          className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-700 transition-all"
-        >
-          Email
+          🔔 <span>Test Notification</span>
         </button>
       </div>
 
