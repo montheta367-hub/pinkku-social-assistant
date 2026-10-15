@@ -132,7 +132,7 @@ export const App: React.FC = () => {
     const token = localStorage.getItem('pinkku_token');
     if (!token) return;
     try {
-      const res = await fetch('/api/messages', { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch('/api/messages', { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
       if (!res.ok) return;
       const data = await res.json();
       const fetched: CustomerMessage[] = data.messages || [];
@@ -155,10 +155,23 @@ export const App: React.FC = () => {
 
   // Poll for new customer messages while the app is open, so Smart Engage's
   // unread badge and the new-message toast reflect real incoming messages.
+  // Browsers throttle setInterval heavily in a backgrounded tab — the common
+  // case here is someone switching to Telegram to send a test message, then
+  // tabbing back — so also force a fresh fetch the moment the tab regains
+  // focus/visibility instead of waiting on the timer to catch up.
   useEffect(() => {
     if (!user.isLoggedIn) return;
-    const interval = setInterval(loadMessages, 20000);
-    return () => clearInterval(interval);
+    const interval = setInterval(loadMessages, 10000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') loadMessages();
+    };
+    window.addEventListener('focus', loadMessages);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', loadMessages);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [user.isLoggedIn, user.id]);
 
   useEffect(() => {
