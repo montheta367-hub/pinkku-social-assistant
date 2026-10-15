@@ -132,24 +132,28 @@ export const App: React.FC = () => {
     const token = localStorage.getItem('pinkku_token');
     if (!token) return;
     try {
+      console.log('[pinkku] loadMessages: fetching at', new Date().toLocaleTimeString());
       const res = await fetch('/api/messages', { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
+      console.log('[pinkku] loadMessages: response status', res.status);
       if (!res.ok) return;
       const data = await res.json();
       const fetched: CustomerMessage[] = data.messages || [];
+      console.log('[pinkku] loadMessages: got', fetched.length, 'messages,', fetched.filter(m => m.status === 'unread').length, 'unread. Previously seen:', seenMessageIdsRef.current?.size ?? '(first load)');
 
       // Only alert for messages that arrived after the first load, so logging
       // in with an already-full inbox doesn't fire a notification for each one.
       if (seenMessageIdsRef.current) {
         const newUnread = fetched.find(m => m.status === 'unread' && !seenMessageIdsRef.current!.has(m.id));
         if (newUnread) {
+          console.log('[pinkku] loadMessages: new unread message detected ->', newUnread.id, newUnread.customerName);
           setNewMessageToast(newUnread);
           playNotificationSound();
         }
       }
       seenMessageIdsRef.current = new Set(fetched.map(m => m.id));
       setMessages(fetched);
-    } catch {
-      // Real messages are a progressive enhancement — silently ignore if unreachable.
+    } catch (err) {
+      console.error('[pinkku] loadMessages: failed', err);
     }
   };
 
