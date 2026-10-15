@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { MessageSquare, X } from 'lucide-react';
 import { UserProfile, PlatformConnection, SocialPost, CustomerMessage } from './types';
 import { guestUserProfile, initialConnections, initialPosts, initialMessages, emptyConnections } from './mockData';
 import { Navbar } from './components/Navbar';
@@ -53,6 +54,8 @@ export const App: React.FC = () => {
   const [fbPageSelectionToken, setFbPageSelectionToken] = useState<string | null>(null);
 
   const [connectNotice, setConnectNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [newMessageToast, setNewMessageToast] = useState<CustomerMessage | null>(null);
+  const seenMessageIdsRef = useRef<Set<string> | null>(null);
 
   // Platforms with a real backend connection (as opposed to the local-only toggle).
   const REAL_PLATFORMS = ['gmail', 'telegram', 'facebook', 'tiktok', 'instagram'];
@@ -94,6 +97,25 @@ export const App: React.FC = () => {
     loadMessages();
   }, [user.isLoggedIn, user.id]);
 
+  const playNotificationSound = () => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const ctx = new AudioContextClass();
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.value = 880;
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+      oscillator.start();
+      oscillator.stop(ctx.currentTime + 0.35);
+    } catch {
+      // Autoplay can be blocked before any user gesture — the toast still shows either way.
+    }
+  };
+
   const loadMessages = async () => {
     const token = localStorage.getItem('pinkku_token');
     if (!token) return;
@@ -101,11 +123,37 @@ export const App: React.FC = () => {
       const res = await fetch('/api/messages', { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) return;
       const data = await res.json();
-      setMessages(data.messages || []);
+      const fetched: CustomerMessage[] = data.messages || [];
+
+      // Only alert for messages that arrived after the first load, so logging
+      // in with an already-full inbox doesn't fire a notification for each one.
+      if (seenMessageIdsRef.current) {
+        const newUnread = fetched.find(m => m.status === 'unread' && !seenMessageIdsRef.current!.has(m.id));
+        if (newUnread) {
+          setNewMessageToast(newUnread);
+          playNotificationSound();
+        }
+      }
+      seenMessageIdsRef.current = new Set(fetched.map(m => m.id));
+      setMessages(fetched);
     } catch {
       // Real messages are a progressive enhancement — silently ignore if unreachable.
     }
   };
+
+  // Poll for new customer messages while the app is open, so Smart Engage's
+  // unread badge and the new-message toast reflect real incoming messages.
+  useEffect(() => {
+    if (!user.isLoggedIn) return;
+    const interval = setInterval(loadMessages, 20000);
+    return () => clearInterval(interval);
+  }, [user.isLoggedIn, user.id]);
+
+  useEffect(() => {
+    if (!newMessageToast) return;
+    const t = setTimeout(() => setNewMessageToast(null), 6000);
+    return () => clearTimeout(t);
+  }, [newMessageToast]);
 
   const loadPosts = async () => {
     const token = localStorage.getItem('pinkku_token');
@@ -372,6 +420,31 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-screen md:h-screen md:overflow-hidden bg-gradient-to-br from-pink-100 via-pink-50 to-rose-100 text-slate-900 flex flex-col">
+      {/* New customer message toast */}
+      {newMessageToast && (
+        <button
+          onClick={() => {
+            setCurrentTab('messages');
+            setNewMessageToast(null);
+          }}
+          className="fixed top-4 right-4 z-50 w-[calc(100%-2rem)] max-w-sm bg-white rounded-2xl border border-pink-200 shadow-xl p-4 flex items-start gap-3 text-left hover:border-pink-300 transition-colors animate-[toast-in_0.2s_ease-out]"
+        >
+          <div className="w-9 h-9 rounded-full bg-pink-100 text-[#FF2D85] flex items-center justify-center shrink-0">
+            <MessageSquare className="w-4 h-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-black text-slate-900">New message from {newMessageToast.customerName}</p>
+            <p className="text-xs text-slate-500 truncate mt-0.5">{newMessageToast.message}</p>
+          </div>
+          <span
+            onClick={(e) => { e.stopPropagation(); setNewMessageToast(null); }}
+            className="text-slate-400 hover:text-slate-600 shrink-0 p-1 -m-1 rounded-lg hover:bg-slate-100"
+          >
+            <X className="w-4 h-4" />
+          </span>
+        </button>
+      )}
+
       {/* Top Navbar */}
       <div className="shrink-0 sticky top-0 z-30">
         <Navbar
