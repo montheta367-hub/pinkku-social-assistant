@@ -1510,9 +1510,9 @@ async function detectOrderInMessage(text: string, fromName: string, userId?: str
     const ai = getGemini(apiKey);
     const prompt = `A customer named "${fromName}" sent this message to a Myanmar business: "${text}"
 
-Does this message contain concrete order-fulfillment details — a phone number and/or a delivery address meant for completing a purchase? A bare question like "price?" or "what colors do you have?" does not count; this is specifically for the step where the customer is giving the business what it needs to ship/deliver something.
+Does this message either (a) commit to ordering/buying a specific product ("I want to order the pink dress", "ဒီအိတ်ကို ယူမယ်"), or (b) give concrete order-fulfillment details — a phone number and/or a delivery address meant for completing a purchase? Either one counts on its own; they don't both need to be in the same message, since a real order usually comes out across several messages. A bare question like "price?", "what colors do you have?", or general browsing does NOT count — this is specifically for when the customer is actually committing to buy, or handing over delivery details for an order already placed.
 
-Output strictly a JSON object: { "orderDetected": boolean, "customerName": string|null (a real name if given, separate from any platform username), "phone": string|null, "address": string|null, "productNote": string|null (what's being ordered, if mentioned or inferable from context) }`;
+Output strictly a JSON object: { "orderDetected": boolean, "customerName": string|null (a real name if given, separate from any platform username), "phone": string|null, "address": string|null, "productNote": string|null (what's being ordered — the specific product/item name, if mentioned or clearly inferable from context) }`;
 
     const response = await generateContentWithRetry(ai, {
       model: 'gemini-flash-lite-latest',
