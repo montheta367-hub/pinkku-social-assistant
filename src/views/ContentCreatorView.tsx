@@ -42,13 +42,43 @@ export const ContentCreatorView: React.FC<ContentCreatorViewProps> = ({ user, on
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [menuOpenFor, setMenuOpenFor] = useState<PlatformType | null>(null);
 
+  // Phone camera photos commonly come in at several MB (3000-4000px wide),
+  // which can blow past the server's request body limit once base64-encoded
+  // (~33% bigger) — resize/compress client-side before it's ever sent, so a
+  // mobile photo behaves the same as a small desktop test image.
   const handlePickMedia = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setMediaPreview(reader.result as string);
-    reader.readAsDataURL(file);
     e.target.value = '';
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 1600;
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height / width) * maxDim);
+            width = maxDim;
+          } else {
+            width = Math.round((width / height) * maxDim);
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { setMediaPreview(dataUrl); return; }
+        ctx.drawImage(img, 0, 0, width, height);
+        setMediaPreview(canvas.toDataURL('image/jpeg', 0.82));
+      };
+      img.onerror = () => setMediaPreview(dataUrl);
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleAddLink = () => {
@@ -94,6 +124,7 @@ export const ContentCreatorView: React.FC<ContentCreatorViewProps> = ({ user, on
       });
 
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Generation failed');
       setGeneratedTitle(data.title || `Promotion: ${topic}`);
       setMyanmarText(data.myanmarContent || "");
       setEnglishText(data.content || "");
