@@ -3,13 +3,15 @@ import {
   Sparkles,
   ArrowRight,
   Wand2,
-  Calendar as CalendarIcon,
   MessageCircle,
   Link2,
   Bot,
   ShieldCheck,
   Menu,
   X,
+  Send,
+  ListChecks,
+  BarChart3,
 } from 'lucide-react';
 import { PlatformLogo } from '../components/PlatformLogo';
 import { PinkkuWebDiagram } from '../components/PinkkuWebDiagram';
@@ -300,14 +302,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
           <p className="text-xs sm:text-sm text-slate-500 font-medium">No bloated enterprise tools — just the essentials, done well.</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {[
-            { icon: Link2, bg: 'bg-pink-100 text-[#FF2D85]', title: 'Smart Publishing', text: 'Connect Gmail, Facebook, TikTok, Instagram, X, YouTube & Telegram — publish manually or on a schedule with a built-in content calendar, then track reach, engagement & posts on a dashboard the AI learns from to recommend what to post next.' },
-            { icon: CalendarIcon, bg: 'bg-blue-100 text-blue-600', title: 'Smart Work', text: 'A flexible workflow calendar for planning tasks and deadlines — organized the way small teams actually work, Notion or Basecamp style.' },
-            { icon: MessageCircle, bg: 'bg-emerald-100 text-emerald-600', title: 'Smart Connect', text: 'One unified inbox for every customer message — reply manually, set rule-based auto-replies, or let the AI reply assistant draft it for you.' },
+            { icon: Send, num: '01', title: 'Smart Publish', text: 'Generate, customize, and schedule AI-written posts for Facebook, Instagram, TikTok & Telegram.' },
+            { icon: MessageCircle, num: '02', title: 'Smart Engage', text: 'Reply to every customer DM with AI-drafted Burmese responses, all from one inbox.' },
+            { icon: ListChecks, num: '03', title: 'Smart Work', text: 'A workflow calendar that turns ideas into reviewed, approved, ready-to-publish posts.' },
+            { icon: BarChart3, num: '04', title: 'Smart Report', text: 'See what is actually working, backed by real numbers and AI-written recommendations.' },
           ].map((f) => (
-            <div key={f.title} className="bg-white rounded-3xl p-7 border border-slate-200/80 shadow-sm space-y-4 hover:shadow-md transition-shadow">
-              <div className={`w-12 h-12 rounded-2xl ${f.bg} flex items-center justify-center`}>
+            <div key={f.title} className="bg-white rounded-3xl p-7 border border-slate-200/80 shadow-sm space-y-4 hover:shadow-md transition-shadow relative">
+              <span className="absolute top-6 right-7 text-xs font-bold text-slate-300">{f.num}</span>
+              <div className="w-12 h-12 rounded-2xl bg-pink-100 text-[#FF2D85] flex items-center justify-center">
                 <f.icon className="w-5 h-5" />
               </div>
               <h3 className="text-base font-black text-slate-900">{f.title}</h3>
