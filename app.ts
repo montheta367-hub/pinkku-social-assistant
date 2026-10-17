@@ -3038,11 +3038,17 @@ app.post('/api/ai/generate-post', requireAuth, async (req: AuthedRequest, res) =
       ? '\nA product photo is also attached — use it to ground the visual details (color, style) of your description alongside the topic text above.'
       : '';
 
-    const prompt = `You are a social media marketing copywriter specializing in Myanmar (Burma) e-commerce & retail.
+    const prompt = `You are a social media marketing copywriter specializing in Myanmar (Burma) e-commerce & retail, known for writing posts that actually stop the scroll instead of reading like a template.
 Create an engaging promotional post for a business of type "${businessType || 'General Retail'}".
 ${topicLine}${photoNote}
 Tone: "${tone || 'Excited & Friendly'}"
 Target Platforms: ${(platforms || ['Facebook', 'Instagram', 'TikTok', 'Telegram']).join(', ')}
+
+${imagePart ? `A photo is attached — look closely at it and write from what you actually see: specific colors, material/texture, styling, setting, mood, or any distinctive detail. Mention at least one concrete visual detail from the photo itself, not a generic description that could apply to any product. ` : ''}Make it genuinely interesting, not boilerplate:
+- Open with a hook (a question, a bold claim, a vivid image) instead of a flat announcement like "We are excited to announce..."
+- Use specific, sensory, concrete details rather than vague superlatives ("the softest knit in this season's pastel pink" beats "amazing quality")
+- Give the reader one clear reason this particular item/offer is worth their attention right now
+- Keep the persuasive close — but earn it, don't just tack on "order now" at the end
 
 Please output a valid JSON object with the following fields:
 - "title": A catchy headline with emoji
