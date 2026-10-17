@@ -2,31 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { BarChart3, MessageSquare, Send, Package, CheckCircle2, Download, Sparkles } from 'lucide-react';
 import { PlatformLogo } from '../components/PlatformLogo';
 import pinkkuIcon from '../assets/pinkku-icon.png';
+import type { ReportInsight, ReportSummary } from '../reportPdf';
+import { UserProfile } from '../types';
 
-interface ReportInsight {
-  title: string;
-  description: string;
-}
-
-interface ReportSummary {
-  period: { since: string; days: number; platform: string };
-  posts: {
-    published: number;
-    failed: number;
-    pending: number;
-    byPlatform: Record<string, { published: number; failed: number; pending: number }>;
-  };
-  messages: {
-    total: number;
-    replied: number;
-    replyRate: number;
-    byPlatform: { telegram: number; facebook: number };
-  };
-  orders: {
-    total: number;
-    fulfilled: number;
-    new: number;
-  };
+interface AnalyticsViewProps {
+  user: UserProfile;
 }
 
 const DATE_RANGES = [
@@ -39,7 +19,7 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export const AnalyticsView: React.FC = () => {
+export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ user }) => {
   const [data, setData] = useState<ReportSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -69,30 +49,17 @@ export const AnalyticsView: React.FC = () => {
 
   const platforms = data ? Object.keys(data.posts.byPlatform) : [];
 
-  const handleDownload = () => {
+  const [downloading, setDownloading] = useState(false);
+
+  const handleDownload = async () => {
     if (!data) return;
-    const rows = [
-      ['Metric', 'Value'],
-      ['Reporting period', `${formatDate(data.period.since)} - ${formatDate(new Date().toISOString())}`],
-      ['Platform filter', data.period.platform],
-      ['Posts Published', String(data.posts.published)],
-      ['Posts Failed', String(data.posts.failed)],
-      ['Posts Pending', String(data.posts.pending)],
-      ['Customer Messages', String(data.messages.total)],
-      ['Messages Replied', String(data.messages.replied)],
-      ['Reply Rate', `${data.messages.replyRate}%`],
-      ['Orders Captured', String(data.orders.total)],
-      ['Orders Fulfilled', String(data.orders.fulfilled)],
-      ['Orders New', String(data.orders.new)],
-    ];
-    const csv = rows.map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `pinkku-report-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    setDownloading(true);
+    try {
+      const { generateReportPdf } = await import('../reportPdf');
+      generateReportPdf(data, insights, user.businessName || user.name);
+    } finally {
+      setDownloading(false);
+    }
   };
 
   return (
@@ -114,11 +81,11 @@ export const AnalyticsView: React.FC = () => {
 
         <button
           onClick={handleDownload}
-          disabled={!data}
+          disabled={!data || downloading}
           className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-pink-500 to-[#FF2D85] text-white font-extrabold text-xs shadow-md shadow-pink-500/25 hover:opacity-95 transition-all flex items-center gap-2 disabled:opacity-50 self-start sm:self-auto"
         >
           <Download className="w-4 h-4" />
-          <span>Download Report</span>
+          <span>{downloading ? 'Preparing PDF…' : 'Download Report'}</span>
         </button>
       </div>
 

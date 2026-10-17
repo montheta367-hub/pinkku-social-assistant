@@ -576,7 +576,7 @@ export const App: React.FC = () => {
           )}
 
           {currentTab === 'analytics' && (
-            <AnalyticsView />
+            <AnalyticsView user={user} />
           )}
 
           {currentTab === 'settings' && (

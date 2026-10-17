@@ -18,7 +18,7 @@ export const initialUserProfile: UserProfile = {
   businessName: "Pinkku Beauty & Lifestyle",
   businessType: 'E-commerce & Cosmetics',
   isLoggedIn: true,
-  tier: 'pro',
+  tier: 'agency',
   connectedPlatforms: ['facebook', 'instagram', 'tiktok', 'telegram', 'gmail']
 };
 
