@@ -12,6 +12,7 @@ import {
   Send,
   ListChecks,
   BarChart3,
+  Check,
 } from 'lucide-react';
 import { PlatformLogo } from '../components/PlatformLogo';
 import { PinkkuWebDiagram } from '../components/PinkkuWebDiagram';
@@ -33,14 +34,39 @@ const PLATFORMS = [
   { id: 'instagram', live: false },
 ];
 
+const PLAN_TIERS = [
+  {
+    name: 'Creator', tagline: 'For solo creators.', priceMonthly: 15000, users: '1 user', popular: false,
+    included: ['Smart Publish', 'Smart Engage', 'Smart Report'],
+    excluded: ['Smart Work', 'Downloadable reports'],
+  },
+  {
+    name: 'Grower', tagline: 'For growing brands.', priceMonthly: 29000, users: '1 user', popular: false,
+    included: ['Smart Publish', 'Smart Engage', 'Smart Report', 'Downloadable reports'],
+    excluded: ['Smart Work'],
+  },
+  {
+    name: 'Agency', tagline: 'For collaborative teams.', priceMonthly: 79000, users: '5 users', popular: true,
+    included: ['Smart Publish', 'Smart Engage', 'Smart Work', 'Smart Report', 'Downloadable reports'],
+    excluded: ['AI auto reply'],
+  },
+  {
+    name: 'Corporate', tagline: 'For larger organizations.', priceMonthly: 149000, users: '10 users', popular: false,
+    included: ['Smart Publish', 'Smart Engage', 'Smart Work', 'Smart Report', 'Downloadable reports', 'AI auto reply'],
+    excluded: [],
+  },
+];
+
 export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
 
   const navLinks = [
     { href: '#solution', label: 'Product' },
     { href: '#how', label: 'How it works' },
     { href: '#preview', label: 'Dashboard' },
     { href: '#features', label: 'Features' },
+    { href: '#pricing', label: 'Pricing' },
   ];
 
   return (
@@ -318,6 +344,95 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
               <p className="text-xs text-slate-500 font-medium leading-relaxed">{f.text}</p>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* ================= PRICING ================= */}
+      <section id="pricing" className="max-w-7xl mx-auto px-4 sm:px-6 py-20">
+        <div className="text-center space-y-2 mb-8">
+          <span className="text-[11px] font-black uppercase tracking-widest text-[#FF2D85]">Packages</span>
+          <h2 className="text-2xl sm:text-3xl font-black text-slate-900">Pricing that grows with your business</h2>
+          <p className="text-xs sm:text-sm text-slate-500 font-medium">Start solo, add seats as your team grows.</p>
+        </div>
+
+        <div className="flex justify-center mb-10">
+          <div className="inline-flex items-center gap-1 p-1 rounded-2xl bg-white border border-slate-200/80 shadow-sm">
+            <button
+              onClick={() => setBillingCycle('monthly')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                billingCycle === 'monthly' ? 'bg-gradient-to-r from-pink-500 to-[#FF2D85] text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Monthly
+            </button>
+            <button
+              onClick={() => setBillingCycle('yearly')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                billingCycle === 'yearly' ? 'bg-gradient-to-r from-pink-500 to-[#FF2D85] text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <span>Yearly</span>
+              <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${billingCycle === 'yearly' ? 'bg-white/20' : 'bg-emerald-100 text-emerald-700'}`}>
+                Save 15%
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {PLAN_TIERS.map((plan) => {
+            const price = billingCycle === 'yearly' ? Math.round(plan.priceMonthly * 0.85) : plan.priceMonthly;
+            return (
+              <div
+                key={plan.name}
+                className={`relative rounded-3xl bg-white border shadow-sm flex flex-col ${
+                  plan.popular ? 'border-[#FF2D85] ring-2 ring-pink-500/20' : 'border-slate-200/80'
+                }`}
+              >
+                {plan.popular && (
+                  <div className="py-2 text-center text-[11px] font-black uppercase tracking-wider text-white bg-gradient-to-r from-pink-500 to-[#FF2D85] rounded-t-3xl">
+                    Most popular
+                  </div>
+                )}
+                <div className="p-7 flex flex-col flex-1">
+                  <h3 className="text-xl font-black text-slate-900">{plan.name}</h3>
+                  <p className="text-xs text-slate-500 font-medium mt-1">{plan.tagline}</p>
+
+                  <div className="flex items-baseline gap-1.5 mt-5">
+                    <span className="text-3xl font-black text-slate-900">{price.toLocaleString()}</span>
+                    <span className="text-[11px] font-bold text-slate-400">MMK<br />/ month</span>
+                  </div>
+                  <p className="text-xs font-bold text-slate-500 mt-2">{plan.users}</p>
+
+                  <div className="border-t border-slate-100 mt-5 pt-5 space-y-2.5 flex-1">
+                    {plan.included.map((f) => (
+                      <div key={f} className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                        <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span>{f}</span>
+                      </div>
+                    ))}
+                    {plan.excluded.map((f) => (
+                      <div key={f} className="flex items-center gap-2 text-xs font-medium text-slate-400">
+                        <X className="w-3.5 h-3.5 shrink-0" />
+                        <span>{f} — Not included</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={onGetStarted}
+                    className={`w-full py-2.5 rounded-xl text-xs font-bold mt-6 transition-all ${
+                      plan.popular
+                        ? 'bg-gradient-to-r from-pink-500 to-[#FF2D85] text-white shadow-md shadow-pink-500/25 hover:opacity-95'
+                        : 'border border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    Choose {plan.name}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </section>
 
