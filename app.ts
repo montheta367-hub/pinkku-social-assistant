@@ -2879,6 +2879,75 @@ Output strictly a JSON object:
   }
 });
 
+// Real Facebook engagement (likes/comments/shares) for recently published
+// posts — pulled live from the Graph API using the post's own
+// external_post_id and the connected Page's access token (pages_read_engagement
+// is already part of FACEBOOK_SCOPES). Not an estimate: these are the
+// platform's own counts. Limited to the most recent posts in the selected
+// window to keep the request count reasonable.
+app.get('/api/report/engagement', requireAuth, async (req: AuthedRequest, res) => {
+  const { days } = parseReportFilters(req);
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  try {
+    const account = await getConnectedAccount(req.user!.id, 'facebook');
+    if (!account || !account.access_token) {
+      return res.json({ available: false });
+    }
+
+    const targets = await pool.query(
+      `SELECT external_post_id FROM post_targets
+       WHERE user_id = $1 AND platform = 'facebook' AND status = 'published'
+         AND external_post_id IS NOT NULL AND created_at >= $2
+       ORDER BY created_at DESC LIMIT 25`,
+      [req.user!.id, since]
+    );
+
+    if (targets.rows.length === 0) {
+      return res.json({ available: false });
+    }
+
+    const results = await Promise.all(targets.rows.map(async (row: { external_post_id: string }) => {
+      try {
+        const r = await fetch(
+          `https://graph.facebook.com/${FACEBOOK_API_VERSION}/${row.external_post_id}?fields=likes.summary(true),comments.summary(true),shares&access_token=${encodeURIComponent(account.access_token!)}`
+        );
+        const d: any = await r.json();
+        if (!r.ok || d.error) return null;
+        return {
+          likes: d.likes?.summary?.total_count || 0,
+          comments: d.comments?.summary?.total_count || 0,
+          shares: d.shares?.count || 0,
+        };
+      } catch {
+        return null;
+      }
+    }));
+
+    const ok = results.filter((r): r is { likes: number; comments: number; shares: number } => r !== null);
+    if (ok.length === 0) {
+      return res.json({ available: false });
+    }
+
+    const totals = ok.reduce((acc, r) => ({
+      likes: acc.likes + r.likes,
+      comments: acc.comments + r.comments,
+      shares: acc.shares + r.shares,
+    }), { likes: 0, comments: 0, shares: 0 });
+
+    return res.json({
+      available: true,
+      postsCounted: ok.length,
+      totalLikes: totals.likes,
+      totalComments: totals.comments,
+      totalShares: totals.shares,
+    });
+  } catch (err) {
+    console.error('[report] engagement error:', err);
+    return res.json({ available: false });
+  }
+});
+
 // Customer Messages — real inbound messages (Telegram, routed via
 // telegram_contacts above; Facebook Messenger, routed via the connected
 // Page's external_id above) shown in the Customer DMs inbox.

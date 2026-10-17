@@ -22,6 +22,14 @@ export interface ReportInsight {
   description: string;
 }
 
+export interface EngagementData {
+  available: boolean;
+  postsCounted?: number;
+  totalLikes?: number;
+  totalComments?: number;
+  totalShares?: number;
+}
+
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
@@ -53,7 +61,7 @@ function sectionHeader(doc: jsPDF, x: number, y: number, label: string, headline
 // Sections the mockup had but Pinkku doesn't track (per-post engagement,
 // audience activity, likes/comments/shares) are simply left out rather
 // than invented.
-export function generateReportPdf(data: ReportSummary, insights: ReportInsight[], businessName: string) {
+export function generateReportPdf(data: ReportSummary, insights: ReportInsight[], businessName: string, engagement?: EngagementData) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -157,6 +165,38 @@ export function generateReportPdf(data: ReportSummary, insights: ReportInsight[]
       doc.setTextColor(...SLATE_900);
       doc.text(String(r.count), margin + 28 + barMaxW + 4, y + 4);
       y += 10;
+    });
+  }
+
+  if (engagement?.available) {
+    y += 8;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(...SLATE_900);
+    doc.text('Facebook Engagement (real-time)', margin, y);
+    y += 3;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(...SLATE_500);
+    doc.text(`Live from Facebook · based on your ${engagement.postsCounted} most recently published posts`, margin, y + 5);
+    y += 13;
+
+    const engStats = [
+      { label: 'Likes', value: String(engagement.totalLikes ?? 0) },
+      { label: 'Comments', value: String(engagement.totalComments ?? 0) },
+      { label: 'Shares', value: String(engagement.totalShares ?? 0) },
+    ];
+    const engColW = contentW / 3;
+    engStats.forEach((s, i) => {
+      const x = margin + i * engColW;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(...SLATE_500);
+      doc.text(s.label, x, y);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(18);
+      doc.setTextColor(...SLATE_900);
+      doc.text(s.value, x, y + 9);
     });
   }
 
