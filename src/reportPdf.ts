@@ -168,24 +168,38 @@ export function generateReportPdf(data: ReportSummary, insights: ReportInsight[]
     });
   }
 
-  if (engagement?.available) {
+  {
     y += 8;
+    const isRealEngagement = !!engagement?.available;
+
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(12);
     doc.setTextColor(...SLATE_900);
-    doc.text('Facebook Engagement (real-time)', margin, y);
+    doc.text(isRealEngagement ? 'Facebook Engagement (real-time)' : 'Facebook Engagement (sample preview)', margin, y);
     y += 3;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(...SLATE_500);
-    doc.text(`Live from Facebook · based on your ${engagement.postsCounted} most recently published posts`, margin, y + 5);
+    const engCaption = isRealEngagement
+      ? `Live from Facebook · based on your ${engagement!.postsCounted} most recently published posts`
+      : 'Sample data — connect Facebook and publish posts to see your real engagement here.';
+    doc.text(engCaption, margin, y + 5);
     y += 13;
 
-    const engStats = [
-      { label: 'Likes', value: String(engagement.totalLikes ?? 0) },
-      { label: 'Comments', value: String(engagement.totalComments ?? 0) },
-      { label: 'Shares', value: String(engagement.totalShares ?? 0) },
-    ];
+    // Placeholder numbers only ever appear here, clearly labeled "sample
+    // preview" above — never substituted for the real total elsewhere in
+    // this report, so a real user's actual numbers are never misrepresented.
+    const engStats = isRealEngagement
+      ? [
+          { label: 'Likes', value: String(engagement!.totalLikes ?? 0) },
+          { label: 'Comments', value: String(engagement!.totalComments ?? 0) },
+          { label: 'Shares', value: String(engagement!.totalShares ?? 0) },
+        ]
+      : [
+          { label: 'Likes', value: '128' },
+          { label: 'Comments', value: '24' },
+          { label: 'Shares', value: '12' },
+        ];
     const engColW = contentW / 3;
     engStats.forEach((s, i) => {
       const x = margin + i * engColW;
@@ -195,7 +209,7 @@ export function generateReportPdf(data: ReportSummary, insights: ReportInsight[]
       doc.text(s.label, x, y);
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(18);
-      doc.setTextColor(...SLATE_900);
+      doc.setTextColor(isRealEngagement ? SLATE_900[0] : 203, isRealEngagement ? SLATE_900[1] : 213, isRealEngagement ? SLATE_900[2] : 225);
       doc.text(s.value, x, y + 9);
     });
   }

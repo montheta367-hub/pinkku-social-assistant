@@ -271,38 +271,51 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ user }) => {
 
           {/* Facebook Engagement — real likes/comments/shares pulled live
               from the Graph API for recently published posts, not an
-              estimate. Hidden entirely when Facebook isn't connected or
-              has no published posts in this window, rather than guessing. */}
-          {engagement.available && (
-            <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm space-y-4">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div>
-                  <h3 className="text-base font-black text-slate-900">Facebook Engagement</h3>
-                  <p className="text-xs text-slate-500 font-medium mt-0.5">
-                    Live from Facebook — based on your {engagement.postsCounted} most recently published {engagement.postsCounted === 1 ? 'post' : 'posts'}.
-                  </p>
+              estimate. When there's no real data yet (Facebook not
+              connected, or no published posts), show clearly-labeled sample
+              numbers instead of hiding the card outright — never presented
+              as real, just a preview of what this looks like once it has
+              something to measure. */}
+          {(() => {
+            const isReal = engagement.available;
+            const likes = isReal ? engagement.totalLikes : 128;
+            const comments = isReal ? engagement.totalComments : 24;
+            const shares = isReal ? engagement.totalShares : 12;
+            return (
+              <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <h3 className="text-base font-black text-slate-900">Facebook Engagement</h3>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5">
+                      {isReal
+                        ? `Live from Facebook — based on your ${engagement.postsCounted} most recently published ${engagement.postsCounted === 1 ? 'post' : 'posts'}.`
+                        : 'Sample preview — connect Facebook and publish posts to see your real engagement here.'}
+                    </p>
+                  </div>
+                  <span className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-full ${isReal ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                    {isReal ? 'Real-time' : 'Sample'}
+                  </span>
                 </div>
-                <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700">Real-time</span>
+                <div className={`grid grid-cols-3 gap-3 ${isReal ? '' : 'opacity-60'}`}>
+                  <div className="p-4 rounded-2xl bg-slate-50/70 border border-slate-200/70 text-center space-y-1">
+                    <Heart className="w-4 h-4 text-rose-500 mx-auto" />
+                    <div className="text-xl font-black text-slate-900">{likes}</div>
+                    <div className="text-[10px] font-bold text-slate-400 uppercase">Likes</div>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-slate-50/70 border border-slate-200/70 text-center space-y-1">
+                    <MessageSquare className="w-4 h-4 text-sky-500 mx-auto" />
+                    <div className="text-xl font-black text-slate-900">{comments}</div>
+                    <div className="text-[10px] font-bold text-slate-400 uppercase">Comments</div>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-slate-50/70 border border-slate-200/70 text-center space-y-1">
+                    <Share2 className="w-4 h-4 text-indigo-500 mx-auto" />
+                    <div className="text-xl font-black text-slate-900">{shares}</div>
+                    <div className="text-[10px] font-bold text-slate-400 uppercase">Shares</div>
+                  </div>
+                </div>
               </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="p-4 rounded-2xl bg-slate-50/70 border border-slate-200/70 text-center space-y-1">
-                  <Heart className="w-4 h-4 text-rose-500 mx-auto" />
-                  <div className="text-xl font-black text-slate-900">{engagement.totalLikes}</div>
-                  <div className="text-[10px] font-bold text-slate-400 uppercase">Likes</div>
-                </div>
-                <div className="p-4 rounded-2xl bg-slate-50/70 border border-slate-200/70 text-center space-y-1">
-                  <MessageSquare className="w-4 h-4 text-sky-500 mx-auto" />
-                  <div className="text-xl font-black text-slate-900">{engagement.totalComments}</div>
-                  <div className="text-[10px] font-bold text-slate-400 uppercase">Comments</div>
-                </div>
-                <div className="p-4 rounded-2xl bg-slate-50/70 border border-slate-200/70 text-center space-y-1">
-                  <Share2 className="w-4 h-4 text-indigo-500 mx-auto" />
-                  <div className="text-xl font-black text-slate-900">{engagement.totalShares}</div>
-                  <div className="text-[10px] font-bold text-slate-400 uppercase">Shares</div>
-                </div>
-              </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Breakdown per Platform */}
           <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm space-y-4">
