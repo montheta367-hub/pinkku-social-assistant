@@ -23,15 +23,13 @@ interface LandingPageProps {
   onLogin: () => void;
 }
 
-// live: true for channels you can actually connect today. Facebook & Instagram
-// are on the roadmap but not live yet, so they're marked "Coming Soon" here
-// instead of implying every channel is available right now.
+// live: true for channels you can actually connect today.
 const PLATFORMS = [
   { id: 'gmail', live: true },
   { id: 'tiktok', live: true },
   { id: 'telegram', live: true },
-  { id: 'facebook', live: false },
-  { id: 'instagram', live: false },
+  { id: 'facebook', live: true },
+  { id: 'instagram', live: true },
 ];
 
 const PLAN_TIERS = [
@@ -284,7 +282,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin 
               <div className="flex items-center justify-between mb-5 flex-wrap gap-2">
                 <div>
                   <h3 className="text-sm font-black text-slate-900">Connected Channels</h3>
-                  <p className="text-xs text-slate-400 font-medium">Gmail, TikTok &amp; Telegram ready today — more channels added regularly</p>
+                  <p className="text-xs text-slate-400 font-medium">Gmail, Facebook, Instagram, TikTok &amp; Telegram ready today — more channels added regularly</p>
                 </div>
                 <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded-full bg-pink-100 text-[#FF2D85]">Demo Preview</span>
               </div>
