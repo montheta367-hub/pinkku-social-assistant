@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { PlatformLogo } from '../components/PlatformLogo';
 import { PinkkuWebDiagram } from '../components/PinkkuWebDiagram';
+import { PLAN_TIERS } from '../planTiers';
 import pinkkuIcon from '../assets/pinkku-icon.png';
 
 interface LandingPageProps {
@@ -30,29 +31,6 @@ const PLATFORMS = [
   { id: 'telegram', live: true },
   { id: 'facebook', live: true },
   { id: 'instagram', live: true },
-];
-
-const PLAN_TIERS = [
-  {
-    name: 'Creator', tagline: 'For solo creators.', priceMonthly: 15000, users: '1 user', popular: false,
-    included: ['Smart Publish', 'Smart Engage', 'Smart Report'],
-    excluded: ['Smart Work', 'Downloadable reports'],
-  },
-  {
-    name: 'Grower', tagline: 'For growing brands.', priceMonthly: 29000, users: '1 user', popular: false,
-    included: ['Smart Publish', 'Smart Engage', 'Smart Report', 'Downloadable reports'],
-    excluded: ['Smart Work'],
-  },
-  {
-    name: 'Agency', tagline: 'For collaborative teams.', priceMonthly: 79000, users: '5 users', popular: true,
-    included: ['Smart Publish', 'Smart Engage', 'Smart Work', 'Smart Report', 'Downloadable reports'],
-    excluded: ['AI auto reply'],
-  },
-  {
-    name: 'Corporate', tagline: 'For larger organizations.', priceMonthly: 149000, users: '10 users', popular: false,
-    included: ['Smart Publish', 'Smart Engage', 'Smart Work', 'Smart Report', 'Downloadable reports', 'AI auto reply'],
-    excluded: [],
-  },
 ];
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogin }) => {

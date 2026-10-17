@@ -71,7 +71,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
 
           <span className="text-xs font-black px-3 py-1 rounded-full bg-pink-100 text-[#FF2D85] border border-pink-200 uppercase">
-            {user.tier || 'Pro'} Plan
+            {user.tier || 'Free'} Plan
           </span>
         </div>
 

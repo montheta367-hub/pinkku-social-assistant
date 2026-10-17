@@ -8,7 +8,7 @@ export interface UserProfile {
   businessName: string;
   businessType: string;
   isLoggedIn: boolean;
-  tier?: 'free' | 'pro' | 'enterprise';
+  tier?: 'free' | 'creator' | 'grower' | 'agency' | 'corporate';
   connectedPlatforms?: PlatformType[];
 }
 
